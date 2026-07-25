@@ -1,0 +1,43 @@
+# Noqte Platform
+.vibe/
+.noqte/
+
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+.next/
+out/
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+.venv/
+venv/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Cache
+.cache/
+.turbo/
+tsconfig.tsbuildinfo
+
+# OS
+Thumbs.db
