@@ -54,7 +54,22 @@
           <section class="panel"><h2>صندوق مکالمات</h2><label>جست‌وجو<input id="lead-search" type="search" placeholder="نام، تماس یا متن پیام"></label><div id="lead-list"></div></section>
           <section class="panel" id="lead-detail" hidden></section>
         </section>
-        <section id="listings-view" class="workspace-view" hidden><section class="panel"><h2>فایل‌های ثبت‌شده</h2><p>این نسخه فقط نمایش فایل‌های موجود را پشتیبانی می‌کند. تطبیق اجاره تا تکمیل مدل رهن و اجاره نمایش داده نمی‌شود.</p><div id="listing-list"></div></section></section>
+        <section id="listings-view" class="workspace-view" hidden>
+          <section class="panel"><h2>ثبت فایل جدید</h2><p>برای فروش فقط قیمت کل و برای رهن و اجاره، رهن و اجارهٔ ماهانه را جدا وارد کنید؛ فیلد خالی نادیده گرفته می‌شود.</p>
+            <form id="listing-form" class="workspace-form">
+              <label>عنوان فایل<input name="title" required maxlength="120"></label>
+              <label>محله<input name="neighborhood" required list="neighborhoods" maxlength="60"></label>
+              <label>تعداد خواب<select name="bedrooms"><option value="0">بدون خواب</option><option value="1">۱</option><option value="2">۲</option><option value="3">۳</option><option value="4">۴</option><option value="5">۵ و بیشتر</option></select></label>
+              <label>نوع معامله<select name="deal_type"><option value="sale">فروش</option><option value="rent">رهن و اجاره</option></select></label>
+              <label data-deal="sale">قیمت کل (تومان)<input name="price" inputmode="numeric" dir="ltr"></label>
+              <label data-deal="rent" hidden>رهن (تومان)<input name="deposit" inputmode="numeric" dir="ltr"></label>
+              <label data-deal="rent" hidden>اجاره ماهانه (تومان)<input name="rent" inputmode="numeric" dir="ltr"></label>
+              <button class="primary-button" type="submit">ثبت فایل</button>
+            </form>
+            <datalist id="neighborhoods"></datalist>
+          </section>
+          <section class="panel"><h2>فایل‌های ثبت‌شده</h2><p>تطبیق بر اساس نیاز ثبت‌شدهٔ مشتری انجام می‌شود؛ بودجهٔ مشخص فیلتر سخت است.</p><div id="listing-list"></div></section>
+        </section>
         <section id="team-view" class="workspace-view" hidden>
           <section class="panel"><h2>مشاوران دفتر</h2><div id="agent-list"></div><form id="agent-form" class="workspace-form"><label>نام مشاور جدید<input name="name" required maxlength="120"></label><button type="submit" class="primary-button">افزودن مشاور</button></form></section>
         </section>

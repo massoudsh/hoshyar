@@ -207,16 +207,43 @@ function renderDetail(lead) {
 function renderListings() {
   const container = $('#listing-list');
   container.replaceChildren();
+  renderNeighborhoods();
   const listings = state.data.listings;
   if (!listings.length) return container.append(empty('فایلی ثبت نشده است.'));
   for (const listing of listings) {
     const row = element('div', 'lead-row');
     row.append(element('strong', '', listing.title));
     row.append(element('span', 'tag', listing.neighborhood));
-    row.append(element('span', 'tag', listing.deal_type === 'rent' ? 'اجاره' : 'فروش'));
+    row.append(element('span', 'tag', listing.deal_type === 'rent' ? 'رهن و اجاره' : 'فروش'));
     row.append(element('span', 'tag', listingLabel(listing)));
+    row.append(element('span', 'tag', listing.bedrooms ? `${number(listing.bedrooms)} خواب` : 'بدون خواب'));
     container.append(row);
   }
+}
+
+function renderNeighborhoods() {
+  const names = new Set(state.data.listings.map((listing) => listing.neighborhood));
+  $('#neighborhoods').replaceChildren(...[...names].map((name) => new Option(name, name)));
+}
+
+function showDealFields(dealType) {
+  document.querySelectorAll('#listing-form [data-deal]').forEach((label) => {
+    const active = label.dataset.deal === dealType;
+    label.hidden = !active;
+    if (!active) label.querySelector('input').value = '';
+  });
+}
+
+// Accepts "750000000", "750,000,000" and "۷۵۰ میلیون"; an empty field returns null.
+function parseAmount(raw) {
+  const value = raw.trim().replace(/[\u0660-\u0669\u06f0-\u06f9]/g, (digit) => String(digit.charCodeAt(0) & 15));
+  if (!value) return null;
+  const match = value.replace(/[,٬\s]/g, '').match(/^(\d+(?:\.\d+)?)(میلیارد|میلیون|هزار)?$/);
+  if (!match) throw new Error('مبلغ را فقط با رقم بنویسید، مثلاً ۷۵۰ میلیون');
+  const unit = { 'میلیارد': 1e9, 'میلیون': 1e6, 'هزار': 1e3 }[match[2]] || 1;
+  const amount = Math.round(Number(match[1]) * unit);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('مبلغ باید بزرگ‌تر از صفر باشد');
+  return amount;
 }
 
 function renderAgents() {
@@ -292,7 +319,43 @@ $('#agent-form').addEventListener('submit', async (event) => {
   }
 });
 
-$('#lead-search').addEventListener('input', renderLeads);
+$('#listing-form').elements.deal_type.addEventListener('change', (event) => showDealFields(event.currentTarget.value));
+
+$('#listing-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const dealType = data.get('deal_type');
+  const submit = form.querySelector('button[type=submit]');
+  let payload;
+  try {
+    payload = {
+      title: String(data.get('title')).trim(),
+      neighborhood: String(data.get('neighborhood')).trim(),
+      bedrooms: Number(data.get('bedrooms')),
+      deal_type: dealType,
+      price: dealType === 'sale' ? parseAmount(String(data.get('price') || '')) : null,
+      deposit: dealType === 'rent' ? parseAmount(String(data.get('deposit') || '')) : null,
+      rent: dealType === 'rent' ? parseAmount(String(data.get('rent') || '')) : null,
+    };
+    if (dealType === 'sale' && !payload.price) throw new Error('برای فایل فروش، قیمت کل لازم است');
+    if (dealType === 'rent' && !payload.deposit && !payload.rent) throw new Error('رهن یا اجارهٔ ماهانه را وارد کنید');
+  } catch (error) {
+    return setStatus(`فایل ثبت نشد: ${error.message}`, true);
+  }
+  submit.disabled = true;
+  try {
+    await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/listings`, payload);
+    await loadWorkspace();
+    form.reset();
+    showDealFields('sale');
+    setStatus('فایل در دفتر ثبت شد.');
+  } catch (error) {
+    setStatus(`فایل ثبت نشد: ${error.message}`, true);
+  } finally {
+    submit.disabled = false;
+  }
+});
 
 $('#refresh').addEventListener('click', async () => {
   try {

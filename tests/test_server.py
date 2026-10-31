@@ -57,6 +57,24 @@ class HttpServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(len(json.loads(body)["leads"]), 1)
 
+    def test_listing_created_over_http_shows_up_in_the_workspace(self) -> None:
+        _, _, body = self.request("POST", "/v1/tenants", {"name": "دفتر"}, {"X-Bootstrap-Key": "bootstrap-secret"})
+        tenant = json.loads(body)
+        tenant_id = tenant["tenant"]["id"]
+        headers = {"X-API-Key": tenant["api_key"]}
+        status, _, home = self.request("GET", "/")
+        self.assertIn(b'id="listing-form"', home)
+        status, _, _ = self.request(
+            "POST", f"/v1/tenants/{tenant_id}/listings",
+            {"title": "دوخوابه ونک", "neighborhood": "ونک", "bedrooms": 2, "deal_type": "rent",
+             "deposit": 300_000_000, "rent": 18_000_000},
+            headers,
+        )
+        self.assertEqual(status, 201)
+        _, _, workspace = self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers=headers)
+        listing = json.loads(workspace)["listings"][0]
+        self.assertEqual((listing["deal_type"], listing["deposit"], listing["rent"]), ("rent", 300_000_000, 18_000_000))
+
     def test_workspace_rejects_wrong_key(self) -> None:
         _, _, body = self.request("POST", "/v1/tenants", {"name": "دفتر"}, {"X-Bootstrap-Key": "bootstrap-secret"})
         tenant_id = json.loads(body)["tenant"]["id"]
