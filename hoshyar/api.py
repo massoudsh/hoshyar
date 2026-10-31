@@ -36,19 +36,43 @@ class HoshyarApi:
                 self.store.save(service)
                 self.store.save_api_key(self._hash(api_key), tenant.id)
                 return 201, {"tenant": self._json(tenant), "api_key": api_key}
+            if method == "POST" and path == "/v1/sessions":
+                service = self.store.load()
+                agent = self._find_member(service, self._required(payload, "tenant"), self._required(payload, "name"))
+                token = secrets.token_urlsafe(32)
+                self.store.save_session(self._hash(token), agent.tenant_id, agent.id)
+                return 201, {"token": token, "tenant_id": agent.tenant_id, "member": self._json(agent)}
+            if method == "DELETE" and path == "/v1/sessions":
+                token = headers.get("x-session-token", "")
+                if token:
+                    self.store.delete_session(self._hash(token))
+                return 200, {"status": "signed out"}
 
             parts = path.strip("/").split("/")
             if len(parts) < 3 or parts[:2] != ["v1", "tenants"]:
                 return 404, {"error": "not found"}
             tenant_id = parts[2]
-            self._authorize_tenant(headers, tenant_id)
+            member_id = self._authorize_tenant(headers, tenant_id)
             service = self.store.load()
             service._tenant(tenant_id)
+            member = service._agent(tenant_id, member_id) if member_id else None
+            if member is not None and member.role != "manager":
+                if parts[3:] in (["agents"], ["listings"], ["baselines"], ["referrals"]):
+                    raise PermissionError("manager role required")
+                if len(parts) == 6 and parts[3] == "leads" and parts[5] == "assignment":
+                    raise PermissionError("manager role required")
 
             if method == "GET" and parts[3:] == ["workspace"]:
+                leads = service._tenant_leads(tenant_id)
+                if member is not None and member.role != "manager":
+                    leads = [lead for lead in leads if lead.assigned_agent_id == member.id]
                 return 200, self._json({
                     "tenant": service._tenant(tenant_id),
-                    "leads": service._tenant_leads(tenant_id),
+                    "viewer": member,
+                    "leads": leads,
+                    "followups": service.followups(
+                        tenant_id, None if member is None or member.role == "manager" else member.id
+                    ),
                     "agents": [agent for agent in service.agents.values() if agent.tenant_id == tenant_id],
                     "listings": [listing for listing in service.listings.values() if listing.tenant_id == tenant_id],
                     "dashboard": service.dashboard(tenant_id),
@@ -60,9 +84,13 @@ class HoshyarApi:
                 self.store.save(service)
                 return 200, {"lead": self._json(lead)}
             if method == "POST" and parts[3:] == ["agents"]:
-                agent = service.add_agent(tenant_id, self._required(payload, "name"))
+                agent = service.add_agent(tenant_id, self._required(payload, "name"), payload.get("role", "agent"))
                 self.store.save(service)
                 return 201, {"agent": self._json(agent)}
+            if method == "GET" and parts[3:] == ["followups"]:
+                return 200, {"followups": self._json(service.followups(tenant_id))}
+            if method == "GET" and parts[3:] == ["me"]:
+                return 200, {"viewer": self._json(member)}
             if method == "POST" and parts[3:] == ["messages"]:
                 lead = service.ingest_message(
                     tenant_id=tenant_id,
@@ -98,15 +126,39 @@ class HoshyarApi:
         except ValueError as error:
             return 400, {"error": str(error)}
 
+    @staticmethod
+    def _find_member(service: HoshyarService, tenant_id: str, name: str) -> Any:
+        service._tenant(tenant_id)
+        wanted = " ".join(name.split())
+        if not wanted:
+            raise ValueError("name is required")
+        matches = [
+            agent for agent in service.agents.values()
+            if agent.tenant_id == tenant_id and " ".join(agent.name.split()) == wanted
+        ]
+        if not matches:
+            raise PermissionError("no team member with that name")
+        if len(matches) > 1:
+            raise ValueError("more than one team member has that name")
+        return matches[0]
+
     def _authorize_bootstrap(self, headers: dict[str, str]) -> None:
         supplied = headers.get("x-bootstrap-key", "")
         if not hmac.compare_digest(supplied, self.bootstrap_key):
             raise PermissionError("invalid bootstrap key")
 
-    def _authorize_tenant(self, headers: dict[str, str], tenant_id: str) -> None:
+    def _authorize_tenant(self, headers: dict[str, str], tenant_id: str) -> str | None:
+        """Return the member id behind a session token, or None for the office-wide key."""
+        token = headers.get("x-session-token", "")
+        if token:
+            owner = self.store.session_owner(self._hash(token))
+            if owner is None or owner[0] != tenant_id:
+                raise PermissionError("invalid session")
+            return owner[1]
         api_key = headers.get("x-api-key", "")
         if not api_key or self.store.tenant_for_api_key(self._hash(api_key)) != tenant_id:
             raise PermissionError("invalid API key")
+        return None
 
     @staticmethod
     def _body(body: bytes) -> dict[str, Any]:

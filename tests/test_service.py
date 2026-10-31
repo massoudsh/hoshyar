@@ -55,6 +55,35 @@ class HoshyarServiceTests(unittest.TestCase):
         self.assertEqual(self.service.dashboard(self.office.id, now=NOW)["at_risk_leads"], [])
         self.assertEqual(lead.assigned_agent_id, self.agent.id)
 
+    def test_followup_queue_orders_late_leads_first_and_skips_answered_ones(self) -> None:
+        overdue = self.service.ingest_message(
+            self.office.id, "0911", "خرید در پونک تا ۸ میلیارد", "telegram", sent_at=NOW - timedelta(hours=80)
+        )
+        fresh = self.service.ingest_message(
+            self.office.id, "0912", "اجاره در ونک", "sms", sent_at=NOW - timedelta(hours=2)
+        )
+        answered = self.service.ingest_message(
+            self.office.id, "0913", "سلام", "sms", sent_at=NOW - timedelta(hours=90)
+        )
+        self.service.ingest_message(
+            self.office.id, "0913", "در خدمتم", "sms", "outbound", NOW - timedelta(hours=89), self.agent.id
+        )
+        assigned = self.service.ingest_message(
+            self.office.id, "0914", "خرید فوری در ونک", "sms", sent_at=NOW, agent_id=self.agent.id
+        )
+        self.service.add_listing(self.office.id, "پونکی", "پونک", 2, price=7_000_000_000)
+
+        queue = self.service.followups(self.office.id, now=NOW)
+        self.assertEqual([item["lead"]["id"] for item in queue[:2]], [overdue.id, fresh.id])
+        self.assertEqual(queue[0]["bucket"], "critical")
+        self.assertEqual(queue[0]["match_count"], 1)
+        self.assertEqual(queue[1]["bucket"], "unassigned")
+        self.assertIn(assigned.id, [item["lead"]["id"] for item in queue])
+        self.assertNotIn(answered.id, [item["lead"]["id"] for item in queue])
+
+        only_mine = self.service.followups(self.office.id, agent_id=self.agent.id, now=NOW)
+        self.assertEqual([item["lead"]["id"] for item in only_mine], [assigned.id])
+
     def test_matching_and_competitive_pricing_alerts_are_tenant_scoped(self) -> None:
         lead = self.service.ingest_message(
             self.office.id, "09120000000", "برای خرید در پونک تا ۸ میلیارد", "divar", sent_at=NOW

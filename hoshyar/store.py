@@ -24,6 +24,9 @@ class SqliteStore:
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS api_keys (key_hash TEXT PRIMARY KEY, tenant_id TEXT NOT NULL)"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS member_sessions (token_hash TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, agent_id TEXT NOT NULL)"
+            )
 
     def load(self) -> HoshyarService:
         with self._connection() as connection:
@@ -33,7 +36,7 @@ class SqliteStore:
         data = json.loads(row[0])
         service = HoshyarService()
         service.tenants = {item["id"]: Tenant(**item) for item in data["tenants"]}
-        service.agents = {item["id"]: Agent(**item) for item in data["agents"]}
+        service.agents = {item["id"]: Agent(**{"role": "agent", **item}) for item in data["agents"]}
         service.listings = {item["id"]: self._listing(item) for item in data["listings"]}
         service.baselines = data["baselines"]
         service.referrals = defaultdict(set, {key: set(value) for key, value in data["referrals"].items()})
@@ -78,6 +81,24 @@ class SqliteStore:
     def save_api_key(self, key_hash: str, tenant_id: str) -> None:
         with self._connection() as connection:
             connection.execute("INSERT INTO api_keys (key_hash, tenant_id) VALUES (?, ?)", (key_hash, tenant_id))
+
+    def save_session(self, token_hash: str, tenant_id: str, agent_id: str) -> None:
+        with self._connection() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO member_sessions (token_hash, tenant_id, agent_id) VALUES (?, ?, ?)",
+                (token_hash, tenant_id, agent_id),
+            )
+
+    def session_owner(self, token_hash: str) -> tuple[str, str] | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT tenant_id, agent_id FROM member_sessions WHERE token_hash = ?", (token_hash,)
+            ).fetchone()
+        return (row[0], row[1]) if row else None
+
+    def delete_session(self, token_hash: str) -> None:
+        with self._connection() as connection:
+            connection.execute("DELETE FROM member_sessions WHERE token_hash = ?", (token_hash,))
 
     def tenant_for_api_key(self, key_hash: str) -> str | None:
         with self._connection() as connection:

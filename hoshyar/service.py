@@ -28,11 +28,17 @@ class HoshyarService:
         self.tenants[tenant.id] = tenant
         return tenant
 
-    def add_agent(self, tenant_id: str, name: str) -> Agent:
+    def add_agent(self, tenant_id: str, name: str, role: str = "agent") -> Agent:
         self._tenant(tenant_id)
-        agent = Agent(id=new_id("agent"), tenant_id=tenant_id, name=name)
+        if role not in {"manager", "agent"}:
+            raise ValueError("role must be manager or agent")
+        agent = Agent(id=new_id("agent"), tenant_id=tenant_id, name=name, role=role)
         self.agents[agent.id] = agent
         return agent
+
+    def manager_count(self, tenant_id: str) -> int:
+        self._tenant(tenant_id)
+        return sum(1 for agent in self.agents.values() if agent.tenant_id == tenant_id and agent.role == "manager")
 
     def ingest_message(
         self,
@@ -124,6 +130,47 @@ class HoshyarService:
             "at_risk_leads": [self._lead_summary(lead) for lead in at_risk],
             "unassigned_leads": [self._lead_summary(lead) for lead in leads if lead.assigned_agent_id is None],
         }
+
+    def followups(self, tenant_id: str, agent_id: str | None = None, now: datetime | None = None,
+                  overdue_hours: int = 24) -> list[dict]:
+        """Every lead waiting on us, soonest deadline first.
+
+        Only a lead whose last message is inbound is waiting; the age is measured from that message.
+        """
+        self._tenant(tenant_id)
+        if agent_id is not None:
+            self._agent(tenant_id, agent_id)
+        now = now or datetime.now(timezone.utc)
+        queue = []
+        for lead in self._tenant_leads(tenant_id):
+            if agent_id is not None and lead.assigned_agent_id != agent_id:
+                continue
+            if not lead.messages or lead.messages[-1].direction != "inbound":
+                continue
+            waiting_hours = (now - lead.messages[-1].sent_at).total_seconds() / 3600
+            if waiting_hours >= overdue_hours * 3:
+                bucket = "critical"
+            elif waiting_hours >= overdue_hours:
+                bucket = "overdue"
+            elif lead.assigned_agent_id is None:
+                bucket = "unassigned"
+            else:
+                bucket = "waiting"
+            matches = len(self.matching_listings(tenant_id, lead.id))
+            queue.append({
+                "lead": self._lead_summary(lead),
+                "waiting_hours": round(waiting_hours, 1),
+                "bucket": bucket,
+                "match_count": matches,
+                "score": self._followup_score(bucket, waiting_hours, matches),
+            })
+        return sorted(queue, key=lambda item: (-item["score"], -item["waiting_hours"]))
+
+    @staticmethod
+    def _followup_score(bucket: str, waiting_hours: float, match_count: int) -> float:
+        # Being late dominates; an answerable lead with real فایلs matters more than one without.
+        weight = {"critical": 30, "overdue": 20, "unassigned": 10, "waiting": 0}[bucket]
+        return weight + min(waiting_hours, 72) * 0.5 + min(match_count, 5) * 2
 
     def matching_listings(self, tenant_id: str, lead_id: str) -> list[dict]:
         lead = self._lead(tenant_id, lead_id)

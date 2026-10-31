@@ -19,6 +19,11 @@ class HoshyarApiTests(unittest.TestCase):
     def request(self, method: str, path: str, payload: dict | None = None, headers: dict | None = None):
         return self.api.handle(method, path, headers or {}, json.dumps(payload or {}).encode())
 
+    def sign_in(self, tenant_id: str, name: str) -> dict:
+        status, response = self.request("POST", "/v1/sessions", {"tenant": tenant_id, "name": name})
+        self.assertEqual(status, 201)
+        return {"x-session-token": response["token"]}
+
     def create_tenant(self) -> tuple[str, str]:
         status, response = self.request(
             "POST", "/v1/tenants", {"name": "املاک آفتاب"}, {"x-bootstrap-key": "bootstrap-secret"}
@@ -77,6 +82,46 @@ class HoshyarApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         _, workspace = self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers=headers)
         self.assertEqual(workspace["leads"][0]["assigned_agent_id"], agent["agent"]["id"])
+
+    def test_member_login_scopes_an_agent_to_their_own_leads(self) -> None:
+        tenant_id, api_key = self.create_tenant()
+        headers = {"x-api-key": api_key}
+        self.request("POST", f"/v1/tenants/{tenant_id}/agents", {"name": "سارا", "role": "manager"}, headers)
+        _, sara = self.request("POST", f"/v1/tenants/{tenant_id}/agents", {"name": "سارا رضایی"}, headers)
+        agent_headers = self.sign_in(tenant_id, "سارا رضایی")
+
+        self.request("POST", f"/v1/tenants/{tenant_id}/messages", {"contact": "0911", "body": "خرید", "channel": "manual"}, headers)
+        _, own = self.request(
+            "POST", f"/v1/tenants/{tenant_id}/messages",
+            {"contact": "0912", "body": "اجاره", "channel": "manual", "agent_id": sara["agent"]["id"]}, headers,
+        )
+        self.assertIsNotNone(own["lead"]["assigned_agent_id"])
+
+        status, workspace = self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers=agent_headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(workspace["viewer"]["role"], "agent")
+        self.assertEqual([lead["contact"] for lead in workspace["leads"]], ["0912"])
+        self.assertEqual({item["lead"]["contact"] for item in workspace["followups"]}, {"0912"})
+
+    def test_agent_role_cannot_manage_the_office(self) -> None:
+        tenant_id, api_key = self.create_tenant()
+        self.request("POST", f"/v1/tenants/{tenant_id}/agents", {"name": "علی"}, {"x-api-key": api_key})
+        agent_headers = self.sign_in(tenant_id, "علی")
+        for path, payload in (
+            (f"/v1/tenants/{tenant_id}/agents", {"name": "دستیار"}),
+            (f"/v1/tenants/{tenant_id}/listings", {"title": "ف", "neighborhood": "ونک", "bedrooms": 1, "price": 1_000}),
+        ):
+            status, _ = self.request("POST", path, payload, agent_headers)
+            self.assertEqual(status, 401)
+        status, _ = self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers={"x-session-token": "forged"})
+        self.assertEqual(status, 401)
+
+    def test_login_rejects_unknown_and_ambiguous_names(self) -> None:
+        tenant_id, api_key = self.create_tenant()
+        self.assertEqual(self.request("POST", "/v1/sessions", {"tenant": tenant_id, "name": "ناشناس"})[0], 401)
+        self.request("POST", f"/v1/tenants/{tenant_id}/agents", {"name": "سارا"}, {"x-api-key": api_key})
+        self.request("POST", f"/v1/tenants/{tenant_id}/agents", {"name": "سارا"}, {"x-api-key": api_key})
+        self.assertEqual(self.request("POST", "/v1/sessions", {"tenant": tenant_id, "name": "سارا"})[0], 400)
 
     def test_workspace_requires_the_tenant_key(self) -> None:
         tenant_id, _ = self.create_tenant()

@@ -26,11 +26,15 @@ class Tenant:
     name: str
 
 
+AgentRole = Literal["manager", "agent"]
+
+
 @dataclass
 class Agent:
     id: str
     tenant_id: str
     name: str
+    role: AgentRole = "agent"
 
 
 @dataclass
