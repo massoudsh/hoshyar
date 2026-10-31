@@ -20,6 +20,10 @@ class HoshyarApi:
         self.bootstrap_key = bootstrap_key
 
     def handle(self, method: str, path: str, headers: dict[str, str], body: bytes = b"") -> tuple[int, dict[str, Any]]:
+        with self.store.transaction():
+            return self._handle(method, path, headers, body)
+
+    def _handle(self, method: str, path: str, headers: dict[str, str], body: bytes) -> tuple[int, dict[str, Any]]:
         try:
             payload = self._body(body)
             if method == "GET" and path == "/health":
@@ -41,6 +45,20 @@ class HoshyarApi:
             service = self.store.load()
             service._tenant(tenant_id)
 
+            if method == "GET" and parts[3:] == ["workspace"]:
+                return 200, self._json({
+                    "tenant": service._tenant(tenant_id),
+                    "leads": service._tenant_leads(tenant_id),
+                    "agents": [agent for agent in service.agents.values() if agent.tenant_id == tenant_id],
+                    "listings": [listing for listing in service.listings.values() if listing.tenant_id == tenant_id],
+                    "dashboard": service.dashboard(tenant_id),
+                    "performance": service.agent_performance(tenant_id),
+                    "measurement": service.measurement_report(tenant_id),
+                })
+            if method == "POST" and len(parts) == 6 and parts[3] == "leads" and parts[5] == "assignment":
+                lead = service.assign_agent(tenant_id, parts[4], self._required(payload, "agent_id"))
+                self.store.save(service)
+                return 200, {"lead": self._json(lead)}
             if method == "POST" and parts[3:] == ["agents"]:
                 agent = service.add_agent(tenant_id, self._required(payload, "name"))
                 self.store.save(service)

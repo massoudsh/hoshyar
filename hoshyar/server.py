@@ -14,13 +14,33 @@ def create_server(database_path: str | Path, bootstrap_key: str, host: str = "12
 
     class RequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            assets = {"/": ("index.html", "text/html; charset=utf-8"),
+                      "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+                      "/app.js": ("app.js", "text/javascript; charset=utf-8")}
+            if self.path in assets:
+                filename, content_type = assets[self.path]
+                content = (Path(__file__).resolve().parent.parent / "frontend" / filename).read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(content)))
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                self.wfile.write(content)
+                return
             self._respond()
 
         def do_POST(self) -> None:
             self._respond()
 
         def _respond(self) -> None:
-            length = int(self.headers.get("Content-Length", "0"))
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                self._send(400, {"error": "invalid content length"})
+                return
+            if length < 0 or self.headers.get("Transfer-Encoding"):
+                self._send(400, {"error": "unsupported request framing"})
+                return
             if length > 1_000_000:
                 self._send(413, {"error": "request body is too large"})
                 return
@@ -34,6 +54,8 @@ def create_server(database_path: str | Path, bootstrap_key: str, host: str = "12
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(encoded)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(encoded)
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import contextmanager
 from dataclasses import asdict
+from threading import local
 from datetime import datetime
 import json
 from pathlib import Path
@@ -14,6 +16,7 @@ from .service import HoshyarService
 class SqliteStore:
     def __init__(self, database_path: str | Path) -> None:
         self.database_path = str(database_path)
+        self._local = local()
         with self._connection() as connection:
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS application_state (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)"
@@ -71,5 +74,25 @@ class SqliteStore:
             row = connection.execute("SELECT tenant_id FROM api_keys WHERE key_hash = ?", (key_hash,)).fetchone()
         return row[0] if row else None
 
-    def _connection(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.database_path)
+    @contextmanager
+    def transaction(self):
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._local.connection = connection
+            try:
+                yield
+            finally:
+                del self._local.connection
+
+    @contextmanager
+    def _connection(self):
+        active = getattr(self._local, "connection", None)
+        if active is not None:
+            yield active
+            return
+        connection = sqlite3.connect(self.database_path, timeout=15)
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()

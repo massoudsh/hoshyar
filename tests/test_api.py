@@ -57,6 +57,33 @@ class HoshyarApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(response["active_lead_count"], 0)
 
+    def test_workspace_lists_leads_and_assigns_an_agent(self) -> None:
+        tenant_id, api_key = self.create_tenant()
+        headers = {"x-api-key": api_key}
+        _, agent = self.request("POST", f"/v1/tenants/{tenant_id}/agents", {"name": "سارا"}, headers)
+        _, lead_response = self.request(
+            "POST", f"/v1/tenants/{tenant_id}/messages",
+            {"contact": "0912", "body": "خرید در پونک", "channel": "manual"}, headers,
+        )
+        lead_id = lead_response["lead"]["id"]
+        status, workspace = self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers=headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(workspace["leads"]), 1)
+        self.assertEqual(workspace["tenant"]["id"], tenant_id)
+
+        status, _ = self.request(
+            "POST", f"/v1/tenants/{tenant_id}/leads/{lead_id}/assignment", {"agent_id": agent["agent"]["id"]}, headers
+        )
+        self.assertEqual(status, 200)
+        _, workspace = self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers=headers)
+        self.assertEqual(workspace["leads"][0]["assigned_agent_id"], agent["agent"]["id"])
+
+    def test_workspace_requires_the_tenant_key(self) -> None:
+        tenant_id, _ = self.create_tenant()
+        _, other_key = self.create_tenant()
+        status, _ = self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers={"x-api-key": other_key})
+        self.assertEqual(status, 401)
+
     def test_tenant_cannot_access_another_tenant(self) -> None:
         first_id, first_key = self.create_tenant()
         second_id, _ = self.create_tenant()
