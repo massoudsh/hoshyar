@@ -75,6 +75,24 @@ class HttpServerTests(unittest.TestCase):
         listing = json.loads(workspace)["listings"][0]
         self.assertEqual((listing["deal_type"], listing["deposit"], listing["rent"]), ("rent", 300_000_000, 18_000_000))
 
+    def test_member_session_signs_in_and_out_over_http(self) -> None:
+        _, _, body = self.request("POST", "/v1/tenants", {"name": "دفتر"}, {"X-Bootstrap-Key": "bootstrap-secret"})
+        tenant = json.loads(body)
+        tenant_id = tenant["tenant"]["id"]
+        manager = {"X-API-Key": tenant["api_key"]}
+        self.request("POST", f"/v1/tenants/{tenant_id}/agents", {"name": "سارا"}, manager)
+
+        status, _, body = self.request("POST", "/v1/sessions", {"tenant": tenant_id, "name": "سارا"})
+        self.assertEqual(status, 201)
+        session = {"X-Session-Token": json.loads(body)["token"]}
+        self.assertEqual(self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers=session)[0], 200)
+
+        status, _, _ = self.request("DELETE", "/v1/sessions", headers=session)
+        self.assertEqual(status, 200)
+        with self.assertRaises(HTTPError) as raised:
+            self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers=session)
+        self.assertEqual(raised.exception.code, 401)
+
     def test_workspace_rejects_wrong_key(self) -> None:
         _, _, body = self.request("POST", "/v1/tenants", {"name": "دفتر"}, {"X-Bootstrap-Key": "bootstrap-secret"})
         tenant_id = json.loads(body)["tenant"]["id"]

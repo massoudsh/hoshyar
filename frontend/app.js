@@ -1,6 +1,7 @@
 'use strict';
 
 const views = {
+  followups: 'پیگیری‌ها',
   overview: 'نمای کلی',
   inbox: 'صندوق مکالمات',
   listings: 'فایل‌ها و تطبیق',
@@ -8,7 +9,7 @@ const views = {
   reports: 'گزارش پایلوت',
 };
 
-const state = { tenant: '', key: '', data: null };
+const state = { tenant: '', key: '', token: '', data: null };
 
 const $ = (selector) => document.querySelector(selector);
 const statusBox = $('#status');
@@ -63,7 +64,7 @@ function listingLabel(listing) {
 async function api(method, path, body) {
   const response = await fetch(path, {
     method,
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': state.key },
+    headers: { 'Content-Type': 'application/json', ...(state.token ? { 'X-Session-Token': state.token } : { 'X-API-Key': state.key }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   let payload = {};
@@ -79,12 +80,19 @@ async function api(method, path, body) {
 async function loadWorkspace() {
   const data = await api('GET', `/v1/tenants/${encodeURIComponent(state.tenant)}/workspace`);
   state.data = data;
-  localStorage.setItem('hoshyar.tenant', state.tenant);
   $('#office-name').textContent = data.tenant.name;
   $('#connection-panel').hidden = true;
   $('#workspace').hidden = false;
   $('#refresh').disabled = false;
   $('#disconnect').hidden = false;
+  const viewer = data.viewer;
+  const isManager = !viewer || viewer.role === 'manager';
+  $('#viewer-badge').textContent = isManager
+    ? 'نمای مدیر: همه مشتریان و فایل‌های دفتر'
+    : `نمای مشاور: ${viewer.name} — فقط مشتریان خودتان`;
+  document.querySelectorAll('.nav-item[data-view="team"]').forEach((item) => { item.hidden = !isManager; });
+  document.querySelectorAll('#listing-form, #agent-form-wrap').forEach((node) => { node.hidden = !isManager; });
+  if (!isManager && !views[currentView()]) showView('followups');
   setStatus('دفتر متصل است. اطلاعات این صفحه از سرور خوانده شده است.');
   render();
 }
@@ -95,6 +103,7 @@ function empty(message) {
 }
 
 function render() {
+  renderFollowups();
   renderStats();
   renderRisks();
   renderLeads();
@@ -119,6 +128,38 @@ function renderStats() {
     card.append(element('p', '', label), element('strong', '', value));
     container.append(card);
   }
+}
+
+const BUCKETS = {
+  critical: ['بیش از سه روز', 'critical'],
+  overdue: ['بیش از ۲۴ ساعت', 'overdue'],
+  unassigned: ['بدون مشاور', ''],
+  waiting: ['در انتظار', ''],
+};
+
+function renderFollowups() {
+  const container = $('#followup-list');
+  container.replaceChildren();
+  const followups = state.data.followups;
+  if (!followups.length) return container.append(empty('مشتری‌ای منتظر پاسخ نیست.'));
+  for (const item of followups) {
+    const [label, tone] = BUCKETS[item.bucket];
+    const row = element('button', 'lead-row lead-button');
+    row.type = 'button';
+    row.append(element('strong', '', text(item.lead.name || item.lead.contact)));
+    row.append(element('span', `tag ${tone}`.trim(), label));
+    row.append(element('span', 'tag', `${number(item.waiting_hours, ' ساعت')} انتظار`));
+    row.append(element('span', 'tag', item.match_count ? `${number(item.match_count)} فایل قابل‌پیشنهاد` : 'بدون فایل مناسب'));
+    row.addEventListener('click', () => {
+      showView('inbox');
+      renderDetail(state.data.leads.find((candidate) => candidate.id === item.lead.id) || lead);
+    });
+    container.append(row);
+  }
+}
+
+function currentView() {
+  return document.querySelector('.nav-item[data-view].active')?.dataset.view;
 }
 
 function renderRisks() {
@@ -201,7 +242,41 @@ function renderDetail(lead) {
       submit.disabled = false;
     }
   });
+  if (state.data.viewer && state.data.viewer.role !== 'manager') form.hidden = true;
   detail.append(form);
+
+  const matches = element('div', 'matches');
+  matches.append(element('h3', '', 'فایل‌های قابل‌پیشنهاد'));
+  const matchList = element('div', '', '');
+  matchList.append(empty('در حال خواندن تطبیق‌ها…'));
+  matches.append(matchList);
+  detail.append(matches);
+  loadMatches(lead, matchList);
+}
+
+async function loadMatches(lead, container) {
+  container.replaceChildren();
+  try {
+    const { matches } = await api('GET', `/v1/tenants/${encodeURIComponent(state.tenant)}/leads/${encodeURIComponent(lead.id)}/matches`);
+    if (!matches.length) {
+      container.append(empty(lead.intent.purpose === 'sell'
+        ? 'این مشتری فروشنده است؛ تطبیق فایل برای خریدار و اجاره‌نشین انجام می‌شود.'
+        : 'فایل متناسبی با نیاز و بودجهٔ این مشتری ثبت نشده است.'));
+      return;
+    }
+    for (const match of matches) {
+      const listing = match.listing;
+      const row = element('div', 'lead-row');
+      row.append(element('strong', '', listing.title));
+      row.append(element('span', 'tag', listing.neighborhood));
+      row.append(element('span', 'tag', listingLabel(listing)));
+      row.append(element('span', 'tag', `${number(listing.bedrooms)} خواب`));
+      row.append(element('span', 'tag', match.score ? `امتیاز ${number(match.score)}` : 'بدون امتیاز محله'));
+      container.append(row);
+    }
+  } catch (error) {
+    container.append(empty(`تطبیق‌ها خوانده نشد: ${error.message}`));
+  }
 }
 
 function renderListings() {
@@ -251,7 +326,12 @@ function renderAgents() {
   container.replaceChildren();
   const agents = state.data.agents;
   if (!agents.length) return container.append(empty('مشاوری ثبت نشده است.'));
-  for (const agent of agents) container.append(element('p', 'agent-row', agent.name));
+  for (const agent of agents) {
+    const row = element('p', 'agent-row');
+    row.append(document.createTextNode(agent.name));
+    row.append(element('span', 'tag', agent.role === 'manager' ? 'مدیر' : 'مشاور'));
+    container.append(row);
+  }
 }
 
 function renderReport() {
@@ -272,15 +352,43 @@ function showView(name) {
 
 document.querySelectorAll('.nav-item[data-view]').forEach((item) => item.addEventListener('click', () => showView(item.dataset.view)));
 
+const fields = (form) => Object.fromEntries(new FormData(form));
+
+function fillOfficeId(tenant) {
+  for (const form of document.querySelectorAll('#connection-form, #manager-form')) form.elements.tenant.value = tenant;
+}
+
 $('#connection-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const data = new FormData(event.currentTarget);
-  state.tenant = String(data.get('tenant')).trim();
-  state.key = String(data.get('key')).trim();
+  const form = event.currentTarget;
+  const data = fields(form);
+  const tenant = String(data.tenant).trim();
+  setStatus('در حال ورود…');
+  try {
+    const session = await api('POST', '/v1/sessions', { tenant, name: String(data.name).trim() });
+    state.tenant = tenant;
+    state.token = session.token;
+    fillOfficeId(tenant);
+    form.elements.name.value = '';
+    await loadWorkspace();
+  } catch (error) {
+    setStatus(`ورود انجام نشد: ${error.message}`, true);
+  }
+});
+
+$('#manager-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = fields(form);
+  state.tenant = String(data.tenant).trim();
+  state.token = '';
+  state.key = String(data.key).trim();
+  fillOfficeId(state.tenant);
   setStatus('در حال اتصال…');
   try {
     await loadWorkspace();
   } catch (error) {
+    state.key = '';
     setStatus(`اتصال برقرار نشد: ${error.message}`, true);
   }
 });
@@ -308,12 +416,14 @@ $('#lead-form').addEventListener('submit', async (event) => {
 $('#agent-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const name = String(new FormData(form).get('name')).trim();
+  const data = fields(form);
+  const name = String(data.name).trim();
+  const role = data.role;
   try {
-    await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/agents`, { name });
+    await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/agents`, { name, role });
     await loadWorkspace();
     form.reset();
-    setStatus('مشاور افزوده شد.');
+    setStatus(role === 'manager' ? 'مدیر افزوده شد.' : 'مشاور افزوده شد.');
   } catch (error) {
     setStatus(`مشاور افزوده نشد: ${error.message}`, true);
   }
@@ -365,12 +475,25 @@ $('#refresh').addEventListener('click', async () => {
   }
 });
 
-$('#disconnect').addEventListener('click', () => {
+$('#disconnect').addEventListener('click', async () => {
+  const tenant = state.tenant;
+  if (state.token) {
+    try {
+      await api('DELETE', '/v1/sessions');
+    } catch {
+      // The local session is dropped either way; a stale token expires with the next request.
+    }
+  }
   state.tenant = '';
   state.key = '';
+  state.token = '';
   state.data = null;
-  localStorage.removeItem('hoshyar.tenant');
+  fillOfficeId(tenant);
   $('#workspace').hidden = true;
+  $('#lead-detail').hidden = true;
+  $('#viewer-badge').textContent = '';
+  $('#agent-form-wrap').hidden = false;
+  document.querySelectorAll('.nav-item[data-view="team"]').forEach((item) => { item.hidden = false; });
   $('#connection-panel').hidden = false;
   $('#refresh').disabled = true;
   $('#disconnect').hidden = true;
@@ -378,6 +501,4 @@ $('#disconnect').addEventListener('click', () => {
   setStatus('اتصال قطع شد.');
 });
 
-const savedTenant = localStorage.getItem('hoshyar.tenant');
-if (savedTenant) $('#connection-form').elements.tenant.value = savedTenant;
 $('#today').textContent = new Intl.DateTimeFormat('fa-IR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());

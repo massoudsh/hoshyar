@@ -14,7 +14,8 @@
     <div class="brand"><span class="brand-mark">ه</span><span><strong>هوشیار</strong><small>اتاق فرمان دفتر</small></span></div>
     <div class="office-switcher"><strong id="office-name">دفتر متصل نشده</strong></div>
     <nav class="nav-list">
-      <button class="nav-item active" data-view="overview">نمای کلی</button>
+      <button class="nav-item active" data-view="followups">پیگیری‌ها</button>
+      <button class="nav-item" data-view="overview">نمای کلی</button>
       <button class="nav-item" data-view="inbox">صندوق مکالمات</button>
       <button class="nav-item" data-view="listings">فایل‌ها و تطبیق</button>
       <button class="nav-item" data-view="team">عملکرد مشاوران</button>
@@ -23,21 +24,33 @@
     <div class="sidebar-bottom"><p>داده‌ها از دفتر متصل خوانده می‌شوند؛ هیچ آمار نمایشی تولید نمی‌شود.</p></div>
   </aside>
   <main class="main-content">
-    <header class="topbar"><strong id="page-title">نمای کلی</strong><div class="top-actions"><button id="refresh" class="outline-button" disabled>تازه‌سازی</button><button id="disconnect" class="outline-button" hidden>قطع اتصال</button></div></header>
+    <header class="topbar"><strong id="page-title">پیگیری‌ها</strong><div class="top-actions"><button id="refresh" class="outline-button" disabled>تازه‌سازی</button><button id="disconnect" class="outline-button" hidden>قطع اتصال</button></div></header>
     <section class="view active-view">
       <div class="welcome-row"><div><p class="eyebrow" id="today"></p><h1>اتاق فرمان دفتر</h1><p class="subheading">پیگیری واقعی مشتری، بدون آمار ساختگی</p></div></div>
       <p id="status" role="status" aria-live="polite">برای دیدن اطلاعات، دفتر خود را متصل کنید.</p>
       <section class="panel" id="connection-panel">
-        <h2>اتصال دفتر</h2>
-        <p>با شناسه و کلید اختصاصی دفتر وارد شوید. کلید فقط در حافظه این صفحه می‌ماند؛ کلید مدیریتی اینجا کاربرد ندارد.</p>
+        <h2>ورود به دفتر</h2>
+        <p>اعضای تیم با شناسه دفتر و نام خودشان وارد می‌شوند و فقط مشتریان خودشان را می‌بینند. مدیر برای دیدن کل دفتر از کلید اختصاصی استفاده می‌کند. هیچ‌کدام در مرورگر ذخیره نمی‌شوند.</p>
         <form id="connection-form" class="workspace-form">
           <label>شناسه دفتر<input name="tenant" required dir="ltr" autocomplete="off"></label>
-          <label>کلید دفتر<input name="key" type="password" required autocomplete="off"></label>
-          <button class="primary-button" type="submit">اتصال</button>
+          <label>نام عضو تیم<input name="name" required maxlength="120" autocomplete="off" placeholder="مثلاً سارا رضایی"></label>
+          <button class="primary-button" type="submit">ورود</button>
         </form>
+        <details class="manager-login">
+          <summary>ورود مدیر با کلید دفتر</summary>
+          <form id="manager-form" class="workspace-form">
+            <label>شناسه دفتر<input name="tenant" required dir="ltr" autocomplete="off"></label>
+            <label>کلید دفتر<input name="key" type="password" required autocomplete="off"></label>
+            <button class="outline-button" type="submit">اتصال مدیر</button>
+          </form>
+        </details>
       </section>
       <div id="workspace" hidden>
-        <section id="overview-view" class="workspace-view">
+        <p id="viewer-badge" class="viewer-badge"></p>
+        <section id="followups-view" class="workspace-view">
+          <section class="panel"><h2>صف پیگیری</h2><p>هر مشتری که آخرین پیامش از طرف اوست، اینجا با اولویت دیرکرد و تعداد فایل قابل‌پیشنهاد مرتب می‌شود.</p><div id="followup-list"></div></section>
+        </section>
+        <section id="overview-view" class="workspace-view" hidden>
           <div class="stat-grid" id="stats"></div>
           <section class="panel"><h2>مشتریان در انتظار پاسخ بیش از ۲۴ ساعت</h2><div id="risk-list"></div></section>
           <section class="panel"><h2>ثبت پیام مشتری</h2><p>ثبت دستی است؛ پیامی به کانال خارجی ارسال نمی‌کند. تشخیص نیاز فعلاً قاعده‌محور است.</p>
@@ -71,7 +84,9 @@
           <section class="panel"><h2>فایل‌های ثبت‌شده</h2><p>تطبیق بر اساس نیاز ثبت‌شدهٔ مشتری انجام می‌شود؛ بودجهٔ مشخص فیلتر سخت است.</p><div id="listing-list"></div></section>
         </section>
         <section id="team-view" class="workspace-view" hidden>
-          <section class="panel"><h2>مشاوران دفتر</h2><div id="agent-list"></div><form id="agent-form" class="workspace-form"><label>نام مشاور جدید<input name="name" required maxlength="120"></label><button type="submit" class="primary-button">افزودن مشاور</button></form></section>
+          <section class="panel"><h2>تیم دفتر</h2><div id="agent-list"></div>
+            <div id="agent-form-wrap"><form id="agent-form" class="workspace-form"><label>نام عضو جدید<input name="name" required maxlength="120"></label><label>نقش<select name="role"><option value="agent">مشاور</option><option value="manager">مدیر</option></select></label><button type="submit" class="primary-button">افزودن عضو</button></form></div>
+          </section>
         </section>
         <section id="reports-view" class="workspace-view" hidden><section class="panel"><h2>اندازه‌گیری پایلوت</h2><p>محاسبه بر اساس پیام‌ها و وضعیت‌های ثبت‌شده؛ نبود داده با صفرِ ساختگی جایگزین نمی‌شود.</p><div id="report"></div></section></section>
       </div>
