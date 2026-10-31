@@ -79,8 +79,14 @@ class HoshyarApi:
                 return 200, self._json(service.dashboard(tenant_id))
             if method == "POST" and parts[3:] == ["listings"]:
                 listing = service.add_listing(
-                    tenant_id, self._required(payload, "title"), self._required(payload, "neighborhood"),
-                    self._integer(payload, "price"), self._integer(payload, "bedrooms"),
+                    tenant_id=tenant_id,
+                    title=self._required(payload, "title"),
+                    neighborhood=self._required(payload, "neighborhood"),
+                    bedrooms=self._integer(payload, "bedrooms"),
+                    deal_type=payload.get("deal_type", "sale"),
+                    price=self._optional_integer(payload, "price"),
+                    deposit=self._optional_integer(payload, "deposit"),
+                    rent=self._optional_integer(payload, "rent"),
                 )
                 self.store.save(service)
                 return 201, {"listing": self._json(listing)}
@@ -121,6 +127,15 @@ class HoshyarApi:
     @staticmethod
     def _integer(payload: dict[str, Any], name: str) -> int:
         value = payload.get(name)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{name} must be an integer")
+        return value
+
+    @staticmethod
+    def _optional_integer(payload: dict[str, Any], name: str) -> int | None:
+        value = payload.get(name)
+        if value is None:
+            return None
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"{name} must be an integer")
         return value

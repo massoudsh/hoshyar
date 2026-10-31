@@ -37,6 +37,29 @@ function percent(value) {
   return value === null || value === undefined ? '—' : `${number(value * 100)}٪`;
 }
 
+function amount(value) {
+  return `${number(value)} تومان`;
+}
+
+function budgetLabel(intent) {
+  if (intent.purpose === 'rent') {
+    const deposit = intent.deposit ? `رهن تا ${amount(intent.deposit)}` : 'رهن نامشخص';
+    const rent = intent.rent ? `اجاره تا ${amount(intent.rent)}` : 'اجاره نامشخص';
+    return `${deposit} · ${rent}`;
+  }
+  return `بودجه: ${intent.price ? amount(intent.price) : 'نامشخص'}`;
+}
+
+function listingLabel(listing) {
+  if (listing.deal_type === 'rent') {
+    const parts = [];
+    if (listing.deposit) parts.push(`رهن ${amount(listing.deposit)}`);
+    if (listing.rent) parts.push(`اجاره ${amount(listing.rent)}`);
+    return parts.length ? parts.join(' · ') : 'بدون مبلغ';
+  }
+  return listing.price ? amount(listing.price) : 'بدون مبلغ';
+}
+
 async function api(method, path, body) {
   const response = await fetch(path, {
     method,
@@ -144,7 +167,7 @@ function renderDetail(lead) {
   detail.append(title, element('p', '', `تماس: ${text(lead.contact)} · وضعیت: ${text(lead.state)}`));
 
   const intent = element('p', 'intent');
-  intent.textContent = `نیاز: ${text(lead.intent.purpose)} · محله: ${text(lead.intent.neighborhood)} · بودجه: ${lead.intent.budget ? number(lead.intent.budget, ' تومان') : '—'} · اطمینان قاعده‌محور: ${percent(lead.intent.confidence)}`;
+  intent.textContent = `نیاز: ${text(lead.intent.purpose)} · محله: ${text(lead.intent.neighborhood)} · ${budgetLabel(lead.intent)} · اطمینان قاعده‌محور: ${percent(lead.intent.confidence)}`;
   detail.append(intent);
 
   const messages = element('div', 'messages');
@@ -190,7 +213,8 @@ function renderListings() {
     const row = element('div', 'lead-row');
     row.append(element('strong', '', listing.title));
     row.append(element('span', 'tag', listing.neighborhood));
-    row.append(element('span', 'tag', number(listing.price, ' تومان')));
+    row.append(element('span', 'tag', listing.deal_type === 'rent' ? 'اجاره' : 'فروش'));
+    row.append(element('span', 'tag', listingLabel(listing)));
     container.append(row);
   }
 }

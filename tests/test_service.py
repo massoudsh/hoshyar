@@ -32,7 +32,7 @@ class HoshyarServiceTests(unittest.TestCase):
         )
         self.assertEqual(lead.id, same_lead.id)
         self.assertEqual(lead.intent.purpose, "buy")
-        self.assertEqual(lead.intent.budget, 8_000_000_000)
+        self.assertEqual(lead.intent.price, 8_000_000_000)
         self.assertEqual(lead.intent.neighborhood, "پونک")
         self.assertEqual(lead.intent.urgency, "high")
         self.assertEqual(len(lead.messages), 2)
@@ -59,14 +59,69 @@ class HoshyarServiceTests(unittest.TestCase):
         lead = self.service.ingest_message(
             self.office.id, "09120000000", "برای خرید در پونک تا ۸ میلیارد", "divar", sent_at=NOW
         )
-        match = self.service.add_listing(self.office.id, "دوخوابه پونک", "پونک", 7_500_000_000, 2)
-        self.service.add_listing(self.office.id, "نمونه یک", "پونک", 12_000_000_000, 2)
-        self.service.add_listing(self.office.id, "نمونه دو", "پونک", 11_000_000_000, 2)
+        match = self.service.add_listing(self.office.id, "دوخوابه پونک", "پونک", 2, price=7_500_000_000)
+        self.service.add_listing(self.office.id, "نمونه یک", "پونک", 2, price=12_000_000_000)
+        self.service.add_listing(self.office.id, "نمونه دو", "پونک", 2, price=11_000_000_000)
         other = self.service.create_tenant("املاک دیگر")
-        self.service.add_listing(other.id, "فایل دیگر", "پونک", 1_000_000_000, 2)
+        self.service.add_listing(other.id, "فایل دیگر", "پونک", 2, price=1_000_000_000)
 
         self.assertEqual(self.service.matching_listings(self.office.id, lead.id)[0]["listing"].id, match.id)
         self.assertEqual(self.service.pricing_alerts(self.office.id)[0]["listing"].id, match.id)
+
+    def test_rental_lead_matches_only_affordable_rentals(self) -> None:
+        lead = self.service.ingest_message(
+            self.office.id, "09120000000",
+            "برای اجاره در ونک تا ۳۰۰ میلیون رهن و ۲۰ میلیون اجاره می‌خوام", "whatsapp", sent_at=NOW,
+        )
+        self.assertEqual(lead.intent.deposit, 300_000_000)
+        self.assertEqual(lead.intent.rent, 20_000_000)
+        self.assertIsNone(lead.intent.price)
+
+        too_expensive = self.service.add_listing(
+            self.office.id, "رهن بالا", "ونک", 1, deal_type="rent", deposit=500_000_000, rent=15_000_000
+        )
+        affordable = self.service.add_listing(
+            self.office.id, "مناسب", "ونک", 1, deal_type="rent", deposit=250_000_000, rent=18_000_000
+        )
+        rental_miss = self.service.add_listing(
+            self.office.id, "اجاره گران", "ونک", 1, deal_type="rent", deposit=250_000_000, rent=30_000_000
+        )
+        sale_in_same_neighborhood = self.service.add_listing(
+            self.office.id, "فروش", "ونک", 1, price=2_000_000_000
+        )
+
+        matched = [match["listing"].id for match in self.service.matching_listings(self.office.id, lead.id)]
+        self.assertEqual(matched, [affordable.id])
+        self.assertNotIn(too_expensive.id, matched)
+        self.assertNotIn(rental_miss.id, matched)
+        self.assertNotIn(sale_in_same_neighborhood.id, matched)
+
+    def test_buy_lead_never_matches_a_rental_listing(self) -> None:
+        lead = self.service.ingest_message(
+            self.office.id, "09120000000", "برای خرید در ونک تا ۸ میلیارد", "telegram", sent_at=NOW
+        )
+        self.service.add_listing(self.office.id, "اجاره ونک", "ونک", 1, deal_type="rent", deposit=100_000_000, rent=10_000_000)
+        purchase = self.service.add_listing(self.office.id, "خرید ونک", "ونک", 1, price=7_000_000_000)
+
+        matched = [match["listing"].id for match in self.service.matching_listings(self.office.id, lead.id)]
+        self.assertEqual(matched, [purchase.id])
+
+    def test_rental_listing_requires_an_amount_and_sale_rejects_rent(self) -> None:
+        with self.assertRaisesRegex(ValueError, "deposit or a monthly rent"):
+            self.service.add_listing(self.office.id, "خالی", "ونک", 1, deal_type="rent")
+        with self.assertRaisesRegex(ValueError, "only a sale price"):
+            self.service.add_listing(self.office.id, "ناقص", "ونک", 1, price=1_000, deposit=1_000)
+        with self.assertRaisesRegex(ValueError, "deal_type"):
+            self.service.add_listing(self.office.id, "نامعتبر", "ونک", 1, deal_type="swap")
+
+    def test_pricing_alerts_do_not_mix_rental_and_sale_prices(self) -> None:
+        self.service.add_listing(self.office.id, "رهن کم", "ونک", 1, deal_type="rent", deposit=20_000_000)
+        self.service.add_listing(self.office.id, "رهن زیاد ۱", "ونک", 1, deal_type="rent", deposit=400_000_000)
+        self.service.add_listing(self.office.id, "رهن زیاد ۲", "ونک", 1, deal_type="rent", deposit=420_000_000)
+        self.service.add_listing(self.office.id, "فروش", "ونک", 1, price=100_000_000)
+
+        alerts = self.service.pricing_alerts(self.office.id)
+        self.assertEqual([alert["listing"].title for alert in alerts], [])
 
     def test_measurement_performance_and_referrals(self) -> None:
         lead = self.service.ingest_message(
@@ -98,6 +153,27 @@ class HoshyarServiceTests(unittest.TestCase):
 class IntentTests(unittest.TestCase):
     def test_intent_without_signals_is_low_confidence(self) -> None:
         self.assertEqual(extract_intent("سلام، اطلاعات می‌خواستم").confidence, 0)
+
+    def test_rental_phrases_keep_deposit_and_rent_apart(self) -> None:
+        cases = {
+            "رهن کامل ۷۰۰ میلیون در ونک": (700_000_000, None),
+            "اجاره ۱۲ میلیون با رهن ۲۰۰ میلیون": (200_000_000, 12_000_000),
+            "می‌خوام تا ۶۰۰ میلیون رهن بدم و ۱۸ میلیون اجاره": (600_000_000, 18_000_000),
+            "رهن ۵۰۰ میلیون، اجاره ۱۵ میلیون، در پونک": (500_000_000, 15_000_000),
+            "اجاره تا ۲۰ میلیون، رهن ۳۰۰ میلیون": (300_000_000, 20_000_000),
+            "برای اجاره در ونک تا ۳۰۰ میلیون رهن و ۲۰ میلیون اجاره": (300_000_000, 20_000_000),
+        }
+        for phrase, (deposit, rent) in cases.items():
+            with self.subTest(phrase=phrase):
+                intent = extract_intent(phrase)
+                self.assertEqual((intent.deposit, intent.rent), (deposit, rent))
+                self.assertIsNone(intent.price)
+
+    def test_sale_phrase_sets_price_not_rent(self) -> None:
+        intent = extract_intent("برای خرید فوری در پونک تا ۸ میلیارد می‌خوام")
+        self.assertEqual(intent.price, 8_000_000_000)
+        self.assertIsNone(intent.deposit)
+        self.assertIsNone(intent.rent)
 
 
 if __name__ == "__main__":

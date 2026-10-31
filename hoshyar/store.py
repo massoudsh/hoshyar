@@ -34,7 +34,7 @@ class SqliteStore:
         service = HoshyarService()
         service.tenants = {item["id"]: Tenant(**item) for item in data["tenants"]}
         service.agents = {item["id"]: Agent(**item) for item in data["agents"]}
-        service.listings = {item["id"]: Listing(**item) for item in data["listings"]}
+        service.listings = {item["id"]: self._listing(item) for item in data["listings"]}
         service.baselines = data["baselines"]
         service.referrals = defaultdict(set, {key: set(value) for key, value in data["referrals"].items()})
         service.pilot_tenants = set(data["pilot_tenants"])
@@ -48,6 +48,16 @@ class SqliteStore:
             lead = Lead(**item)
             service.leads[lead.id] = lead
         return service
+
+    @staticmethod
+    def _listing(item: dict) -> Listing:
+        """Older snapshots stored a single price and no deal type; keep them readable as sale listings."""
+        return Listing(
+            id=item["id"], tenant_id=item["tenant_id"], title=item["title"],
+            neighborhood=item["neighborhood"], bedrooms=item["bedrooms"],
+            deal_type=item.get("deal_type", "sale"), price=item.get("price"),
+            deposit=item.get("deposit"), rent=item.get("rent"),
+        )
 
     def save(self, service: HoshyarService) -> None:
         payload = json.dumps({

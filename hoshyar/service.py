@@ -81,12 +81,36 @@ class HoshyarService:
         return lead
 
     def add_listing(
-        self, tenant_id: str, title: str, neighborhood: str, price: int, bedrooms: int
+        self,
+        tenant_id: str,
+        title: str,
+        neighborhood: str,
+        bedrooms: int,
+        deal_type: str = "sale",
+        price: int | None = None,
+        deposit: int | None = None,
+        rent: int | None = None,
     ) -> Listing:
         self._tenant(tenant_id)
-        if price <= 0 or bedrooms < 0:
-            raise ValueError("listing price must be positive and bedrooms cannot be negative")
-        listing = Listing(new_id("listing"), tenant_id, title, neighborhood, price, bedrooms)
+        if bedrooms < 0:
+            raise ValueError("bedrooms cannot be negative")
+        if deal_type not in {"sale", "rent"}:
+            raise ValueError("deal_type must be sale or rent")
+        amounts = {"price": price, "deposit": deposit, "rent": rent}
+        if any(value is not None and value <= 0 for value in amounts.values()):
+            raise ValueError("listing amounts must be positive")
+        if deal_type == "sale":
+            if not price or deposit or rent:
+                raise ValueError("a sale listing needs only a sale price")
+            deposit = rent = None
+        elif not deposit and not rent:
+            raise ValueError("a rental listing needs a deposit or a monthly rent")
+        else:
+            price = None
+        listing = Listing(
+            id=new_id("listing"), tenant_id=tenant_id, title=title, neighborhood=neighborhood,
+            deal_type=deal_type, bedrooms=bedrooms, price=price, deposit=deposit, rent=rent,
+        )
         self.listings[listing.id] = listing
         return listing
 
@@ -105,26 +129,42 @@ class HoshyarService:
         lead = self._lead(tenant_id, lead_id)
         if lead.intent.purpose not in {"buy", "rent"}:
             return []
+        deal_type = "rent" if lead.intent.purpose == "rent" else "sale"
         matches = []
         for listing in self.listings.values():
-            if listing.tenant_id != tenant_id:
+            if listing.tenant_id != tenant_id or listing.deal_type != deal_type:
+                continue
+            # A known budget is a hard constraint: an unaffordable listing is not a match, however close it is.
+            if deal_type == "sale":
+                budget, amount = lead.intent.price, listing.price
+                if budget and (amount is None or amount > budget):
+                    continue
+            elif not self._rent_fits(lead.intent.deposit, lead.intent.rent, listing):
                 continue
             score = 0
             if lead.intent.neighborhood and listing.neighborhood == lead.intent.neighborhood:
                 score += 2
-            if lead.intent.budget and listing.price <= lead.intent.budget:
-                score += 2
             if score:
                 matches.append({"listing": listing, "score": score})
-        return sorted(matches, key=lambda match: (-match["score"], match["listing"].price))
+        return sorted(matches, key=lambda match: -match["score"])
+
+    @staticmethod
+    def _rent_fits(deposit: int | None, rent: int | None, listing: Listing) -> bool:
+        deposit_fits = not deposit or (listing.deposit is not None and listing.deposit <= deposit)
+        rent_fits = not rent or (listing.rent is not None and listing.rent <= rent)
+        return deposit_fits and rent_fits and bool(deposit or rent)
 
     def pricing_alerts(self, tenant_id: str, under_market_ratio: float = 0.85) -> list[dict]:
         self._tenant(tenant_id)
         alerts = []
         listings = [listing for listing in self.listings.values() if listing.tenant_id == tenant_id]
         for listing in listings:
-            peers = [other.price for other in listings if other.id != listing.id and other.neighborhood == listing.neighborhood]
-            if peers and listing.price < mean(peers) * under_market_ratio:
+            peers = [
+                other.price for other in listings
+                if other.id != listing.id and other.neighborhood == listing.neighborhood
+                and other.deal_type == listing.deal_type and other.price is not None
+            ]
+            if listing.price is not None and peers and listing.price < mean(peers) * under_market_ratio:
                 alerts.append({"listing": listing, "market_average": int(mean(peers))})
         return alerts
 

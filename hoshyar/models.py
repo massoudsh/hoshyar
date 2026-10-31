@@ -6,12 +6,15 @@ from typing import Literal
 from uuid import uuid4
 
 LeadState = Literal["new", "in_progress", "unanswered", "cold", "converted"]
+DealType = Literal["sale", "rent"]
 
 
 @dataclass(frozen=True)
 class Intent:
     purpose: str | None = None
-    budget: int | None = None
+    price: int | None = None
+    deposit: int | None = None
+    rent: int | None = None
     neighborhood: str | None = None
     urgency: str | None = None
     confidence: float = 0.0
@@ -61,8 +64,11 @@ class Listing:
     tenant_id: str
     title: str
     neighborhood: str
-    price: int
+    deal_type: DealType
     bedrooms: int
+    price: int | None = None
+    deposit: int | None = None
+    rent: int | None = None
 
 
 def new_id(prefix: str) -> str:
