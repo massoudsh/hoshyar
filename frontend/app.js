@@ -108,6 +108,7 @@ function render() {
   renderRisks();
   renderLeads();
   renderListings();
+  renderStale();
   renderAgents();
   renderReport();
 }
@@ -287,14 +288,79 @@ function renderListings() {
   renderNeighborhoods();
   const listings = state.data.listings;
   if (!listings.length) return container.append(empty('فایلی ثبت نشده است.'));
-  for (const listing of listings) {
-    const row = element('div', 'lead-row');
-    row.append(element('strong', '', listing.title));
-    row.append(element('span', 'tag', listing.neighborhood));
-    row.append(element('span', 'tag', listing.deal_type === 'rent' ? 'رهن و اجاره' : 'فروش'));
-    row.append(element('span', 'tag', listingLabel(listing)));
-    row.append(element('span', 'tag', listing.bedrooms ? `${number(listing.bedrooms)} خواب` : 'بدون خواب'));
-    container.append(row);
+  for (const listing of listings) container.append(listingRow(listing));
+}
+
+function listingRow(listing) {
+  const row = element('div', 'lead-row');
+  row.append(element('strong', '', listing.title));
+  row.append(element('span', 'tag', listing.neighborhood));
+  row.append(element('span', 'tag', listing.deal_type === 'rent' ? 'رهن و اجاره' : 'فروش'));
+  row.append(element('span', 'tag', listingLabel(listing)));
+  row.append(element('span', 'tag', listing.bedrooms ? `${number(listing.bedrooms)} خواب` : 'بدون خواب'));
+  if (listing.updated_at) {
+    row.append(element('span', 'tag', `آخرین به‌روزرسانی: ${new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium' }).format(new Date(listing.updated_at))}`));
+  }
+  const edit = element('button', 'outline-button', 'ویرایش');
+  edit.type = 'button';
+  edit.addEventListener('click', () => openListingEditor(listing));
+  const remove = element('button', 'outline-button', 'حذف');
+  remove.type = 'button';
+  remove.addEventListener('click', () => deleteListing(listing, remove));
+  row.append(edit, remove);
+  return row;
+}
+
+function openListingEditor(listing) {
+  const form = $('#listing-form');
+  form.elements.title.value = listing.title;
+  form.elements.neighborhood.value = listing.neighborhood;
+  form.elements.bedrooms.value = String(Math.min(listing.bedrooms, 5));
+  form.elements.deal_type.value = listing.deal_type;
+  showDealFields(listing.deal_type);
+  form.elements.price.value = listing.price ?? '';
+  form.elements.deposit.value = listing.deposit ?? '';
+  form.elements.rent.value = listing.rent ?? '';
+  form.dataset.editing = listing.id;
+  form.querySelector('button[type=submit]').textContent = 'ذخیره تغییرات';
+  form.scrollIntoView({ block: 'start' });
+  setStatus(`ویرایش فایل «${listing.title}»؛ برای انصراف فرم را خالی کنید.`);
+}
+
+function resetListingForm(form) {
+  form.reset();
+  delete form.dataset.editing;
+  form.querySelector('button[type=submit]').textContent = 'ثبت فایل';
+  showDealFields('sale');
+}
+
+async function deleteListing(listing, button) {
+  if (!window.confirm(`فایل «${listing.title}» حذف شود؟ این کار برگشت‌پذیر نیست.`)) return;
+  button.disabled = true;
+  try {
+    await api('DELETE', `/v1/tenants/${encodeURIComponent(state.tenant)}/listings/${encodeURIComponent(listing.id)}`);
+    await loadWorkspace();
+    setStatus('فایل حذف شد.');
+  } catch (error) {
+    setStatus(`فایل حذف نشد: ${error.message}`, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function renderStale() {
+  const container = $('#stale-list');
+  container.replaceChildren();
+  try {
+    const { stale } = await api('GET', `/v1/tenants/${encodeURIComponent(state.tenant)}/stale-listings`);
+    if (!stale.length) return container.append(empty('فایل قدیمی‌ای نیست.'));
+    for (const item of stale) {
+      const row = listingRow(item.listing);
+      row.prepend(element('span', 'tag overdue', `${number(item.age_days)} روز بدون به‌روزرسانی`));
+      container.append(row);
+    }
+  } catch (error) {
+    container.append(empty(`فهرست فایل‌های قدیمی خوانده نشد: ${error.message}`));
   }
 }
 
@@ -456,12 +522,16 @@ $('#listing-form').addEventListener('submit', async (event) => {
     return setStatus(`فایل ثبت نشد: ${error.message}`, true);
   }
   submit.disabled = true;
+  const editing = form.dataset.editing;
   try {
-    await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/listings`, payload);
+    if (editing) {
+      await api('PATCH', `/v1/tenants/${encodeURIComponent(state.tenant)}/listings/${encodeURIComponent(editing)}`, payload);
+    } else {
+      await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/listings`, payload);
+    }
     await loadWorkspace();
-    form.reset();
-    showDealFields('sale');
-    setStatus('فایل در دفتر ثبت شد.');
+    resetListingForm(form);
+    setStatus(editing ? 'تغییرات فایل ذخیره شد.' : 'فایل در دفتر ثبت شد.');
   } catch (error) {
     setStatus(`فایل ثبت نشد: ${error.message}`, true);
   } finally {
@@ -515,6 +585,7 @@ $('#disconnect').addEventListener('click', async () => {
   $('#agent-form-wrap').hidden = false;
   $('#channel-panel').hidden = false;
   $('#channel-result').replaceChildren();
+  resetListingForm($('#listing-form'));
   document.querySelectorAll('.nav-item[data-view="team"]').forEach((item) => { item.hidden = false; });
   $('#connection-panel').hidden = false;
   $('#refresh').disabled = true;

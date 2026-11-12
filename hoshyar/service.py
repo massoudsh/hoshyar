@@ -113,12 +113,73 @@ class HoshyarService:
             raise ValueError("a rental listing needs a deposit or a monthly rent")
         else:
             price = None
+        now = datetime.now(timezone.utc)
         listing = Listing(
             id=new_id("listing"), tenant_id=tenant_id, title=title, neighborhood=neighborhood,
             deal_type=deal_type, bedrooms=bedrooms, price=price, deposit=deposit, rent=rent,
+            created_at=now, updated_at=now,
         )
         self.listings[listing.id] = listing
         return listing
+
+    def update_listing(self, tenant_id: str, listing_id: str, **changes) -> Listing:
+        """Apply only the fields the caller sent; re-validate the merged result like a new listing."""
+        listing = self._listing(tenant_id, listing_id)
+        merged = {
+            "title": changes.get("title", listing.title),
+            "neighborhood": changes.get("neighborhood", listing.neighborhood),
+            "bedrooms": changes.get("bedrooms", listing.bedrooms),
+            "deal_type": changes.get("deal_type", listing.deal_type),
+            "price": changes.get("price", listing.price),
+            "deposit": changes.get("deposit", listing.deposit),
+            "rent": changes.get("rent", listing.rent),
+        }
+        if not isinstance(merged["title"], str) or not merged["title"].strip():
+            raise ValueError("title is required")
+        if not isinstance(merged["neighborhood"], str) or not merged["neighborhood"].strip():
+            raise ValueError("neighborhood is required")
+        if isinstance(merged["bedrooms"], bool) or not isinstance(merged["bedrooms"], int) or merged["bedrooms"] < 0:
+            raise ValueError("bedrooms cannot be negative")
+        if merged["deal_type"] not in {"sale", "rent"}:
+            raise ValueError("deal_type must be sale or rent")
+        amounts = {name: merged[name] for name in ("price", "deposit", "rent")}
+        if any(value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0)
+               for value in amounts.values()):
+            raise ValueError("listing amounts must be positive")
+        if merged["deal_type"] == "sale":
+            if not merged["price"] or merged["deposit"] or merged["rent"]:
+                raise ValueError("a sale listing needs only a sale price")
+            merged["deposit"] = merged["rent"] = None
+        elif not merged["deposit"] and not merged["rent"]:
+            raise ValueError("a rental listing needs a deposit or a monthly rent")
+        else:
+            merged["price"] = None
+        for name, value in merged.items():
+            setattr(listing, name, value.strip() if isinstance(value, str) else value)
+        listing.updated_at = datetime.now(timezone.utc)
+        return listing
+
+    def delete_listing(self, tenant_id: str, listing_id: str) -> None:
+        self._listing(tenant_id, listing_id)
+        del self.listings[listing_id]
+
+    def stale_listings(self, tenant_id: str, days: int = 14, now: datetime | None = None) -> list[dict]:
+        """فایلs nobody has touched for a while; an old فایل is usually sold or rented already."""
+        self._tenant(tenant_id)
+        if days <= 0:
+            raise ValueError("days must be positive")
+        now = now or datetime.now(timezone.utc)
+        stale = []
+        for listing in self.listings.values():
+            if listing.tenant_id != tenant_id:
+                continue
+            touched = listing.updated_at or listing.created_at
+            if touched is None:
+                continue
+            age_days = (now - touched).total_seconds() / 86400
+            if age_days >= days:
+                stale.append({"listing": listing, "age_days": round(age_days, 1)})
+        return sorted(stale, key=lambda item: -item["age_days"])
 
     def dashboard(self, tenant_id: str, now: datetime | None = None, overdue_hours: int = 24) -> dict:
         self._tenant(tenant_id)
@@ -284,6 +345,15 @@ class HoshyarService:
         if agent.tenant_id != tenant_id:
             raise ValueError("cross-tenant access denied")
         return agent
+
+    def _listing(self, tenant_id: str, listing_id: str) -> Listing:
+        try:
+            listing = self.listings[listing_id]
+        except KeyError as error:
+            raise ValueError("unknown listing") from error
+        if listing.tenant_id != tenant_id:
+            raise ValueError("cross-tenant access denied")
+        return listing
 
     def _lead(self, tenant_id: str, lead_id: str) -> Lead:
         try:

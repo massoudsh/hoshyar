@@ -61,7 +61,7 @@ class HoshyarApi:
             member = service._agent(tenant_id, member_id) if member_id else None
             if member is not None and member.role != "manager":
                 if parts[3:] in (["agents"], ["listings"], ["baselines"], ["referrals"]) or (
-                    len(parts) == 5 and parts[3] == "channels"
+                    len(parts) == 5 and parts[3] in {"channels", "listings"}
                 ):
                     raise PermissionError("manager role required")
                 if len(parts) == 6 and parts[3] == "leads" and parts[5] == "assignment":
@@ -130,6 +130,17 @@ class HoshyarApi:
                 )
                 self.store.save(service)
                 return 201, {"listing": self._json(listing)}
+            if len(parts) == 5 and parts[3] == "listings":
+                if method == "PATCH":
+                    listing = service.update_listing(tenant_id, parts[4], **self._listing_changes(payload))
+                    self.store.save(service)
+                    return 200, {"listing": self._json(listing)}
+                if method == "DELETE":
+                    service.delete_listing(tenant_id, parts[4])
+                    self.store.save(service)
+                    return 200, {"status": "deleted"}
+            if method == "GET" and parts[3:] == ["stale-listings"]:
+                return 200, {"stale": self._json(service.stale_listings(tenant_id))}
             if method == "GET" and len(parts) == 6 and parts[3] == "leads" and parts[5] == "matches":
                 return 200, {"matches": self._json(service.matching_listings(tenant_id, parts[4]))}
             return 404, {"error": "not found"}
@@ -221,6 +232,22 @@ class HoshyarApi:
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"{name} must be an integer")
         return value
+
+    @classmethod
+    def _listing_changes(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        """Only the keys the caller sent, so a PATCH never blanks an untouched field."""
+        changes: dict[str, Any] = {}
+        for name in ("title", "neighborhood", "deal_type"):
+            if name in payload:
+                changes[name] = cls._required(payload, name)
+        if "bedrooms" in payload:
+            changes["bedrooms"] = cls._integer(payload, "bedrooms")
+        for name in ("price", "deposit", "rent"):
+            if name in payload:
+                changes[name] = cls._optional_integer(payload, name)
+        if not changes:
+            raise ValueError("no listing fields to update")
+        return changes
 
     @staticmethod
     def _optional_integer(payload: dict[str, Any], name: str) -> int | None:

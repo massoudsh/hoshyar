@@ -123,6 +123,25 @@ class HoshyarApiTests(unittest.TestCase):
         self.request("POST", f"/v1/tenants/{tenant_id}/agents", {"name": "سارا"}, {"x-api-key": api_key})
         self.assertEqual(self.request("POST", "/v1/sessions", {"tenant": tenant_id, "name": "سارا"})[0], 400)
 
+    def test_listing_patch_and_delete_round_trip(self) -> None:
+        tenant_id, api_key = self.create_tenant()
+        headers = {"x-api-key": api_key}
+        _, created = self.request(
+            "POST", f"/v1/tenants/{tenant_id}/listings",
+            {"title": "ونک", "neighborhood": "ونک", "bedrooms": 2, "price": 5_000_000_000}, headers,
+        )
+        listing_id = created["listing"]["id"]
+        status, patched = self.request(
+            "PATCH", f"/v1/tenants/{tenant_id}/listings/{listing_id}", {"price": 4_000_000_000}, headers
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(patched["listing"]["price"], 4_000_000_000)
+        self.assertEqual(patched["listing"]["title"], "ونک")
+        self.assertEqual(self.request("PATCH", f"/v1/tenants/{tenant_id}/listings/{listing_id}", {}, headers)[0], 400)
+        self.assertEqual(self.request("DELETE", f"/v1/tenants/{tenant_id}/listings/{listing_id}", headers=headers)[0], 200)
+        _, workspace = self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers=headers)
+        self.assertEqual(workspace["listings"], [])
+
     def test_workspace_requires_the_tenant_key(self) -> None:
         tenant_id, _ = self.create_tenant()
         _, other_key = self.create_tenant()

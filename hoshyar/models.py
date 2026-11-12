@@ -62,7 +62,7 @@ class Lead:
     messages: list[Message] = field(default_factory=list)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Listing:
     id: str
     tenant_id: str
@@ -73,6 +73,8 @@ class Listing:
     price: int | None = None
     deposit: int | None = None
     rent: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 def new_id(prefix: str) -> str:

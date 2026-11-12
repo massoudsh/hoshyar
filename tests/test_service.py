@@ -84,6 +84,41 @@ class HoshyarServiceTests(unittest.TestCase):
         only_mine = self.service.followups(self.office.id, agent_id=self.agent.id, now=NOW)
         self.assertEqual([item["lead"]["id"] for item in only_mine], [assigned.id])
 
+    def test_listing_can_be_edited_and_deleted_within_its_tenant(self) -> None:
+        listing = self.service.add_listing(self.office.id, "دوخوابه", "ونک", 2, price=5_000_000_000)
+        edited = self.service.update_listing(self.office.id, listing.id, price=4_500_000_000)
+        self.assertEqual(edited.price, 4_500_000_000)
+        self.assertEqual(edited.title, "دوخوابه")
+        self.assertIsNotNone(edited.updated_at)
+
+        with self.assertRaisesRegex(ValueError, "deposit or a monthly rent"):
+            self.service.update_listing(self.office.id, listing.id, deal_type="rent")
+        with self.assertRaisesRegex(ValueError, "only a sale price"):
+            self.service.update_listing(self.office.id, listing.id, deposit=100_000_000)
+        with self.assertRaisesRegex(ValueError, "positive"):
+            self.service.update_listing(self.office.id, listing.id, price=-1)
+
+        other = self.service.create_tenant("املاک دیگر")
+        with self.assertRaisesRegex(ValueError, "cross-tenant"):
+            self.service.delete_listing(other.id, listing.id)
+        self.service.delete_listing(self.office.id, listing.id)
+        self.assertNotIn(listing.id, self.service.listings)
+        with self.assertRaisesRegex(ValueError, "unknown listing"):
+            self.service.delete_listing(self.office.id, listing.id)
+
+    def test_stale_listings_are_oldest_first_and_tenant_scoped(self) -> None:
+        old = self.service.add_listing(self.office.id, "قدیمی", "ونک", 1, price=1_000_000_000)
+        fresh = self.service.add_listing(self.office.id, "تازه", "ونک", 1, price=2_000_000_000)
+        old.updated_at = NOW - timedelta(days=40)
+        fresh.updated_at = NOW - timedelta(days=2)
+        other = self.service.create_tenant("املاک دیگر")
+        foreign = self.service.add_listing(other.id, "دیگری", "ونک", 1, price=1_000_000_000)
+        foreign.updated_at = NOW - timedelta(days=90)
+
+        stale = self.service.stale_listings(self.office.id, days=14, now=NOW)
+        self.assertEqual([item["listing"].id for item in stale], [old.id])
+        self.assertEqual(stale[0]["age_days"], 40.0)
+
     def test_matching_and_competitive_pricing_alerts_are_tenant_scoped(self) -> None:
         lead = self.service.ingest_message(
             self.office.id, "09120000000", "برای خرید در پونک تا ۸ میلیارد", "divar", sent_at=NOW

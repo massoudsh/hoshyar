@@ -61,11 +61,16 @@ class SqliteStore:
     @staticmethod
     def _listing(item: dict) -> Listing:
         """Older snapshots stored a single price and no deal type; keep them readable as sale listings."""
+        def moment(name: str) -> datetime | None:
+            value = item.get(name)
+            return datetime.fromisoformat(value) if value else None
+
         return Listing(
             id=item["id"], tenant_id=item["tenant_id"], title=item["title"],
             neighborhood=item["neighborhood"], bedrooms=item["bedrooms"],
             deal_type=item.get("deal_type", "sale"), price=item.get("price"),
             deposit=item.get("deposit"), rent=item.get("rent"),
+            created_at=moment("created_at"), updated_at=moment("updated_at"),
         )
 
     def save(self, service: HoshyarService) -> None:

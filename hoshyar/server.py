@@ -35,6 +35,9 @@ def create_server(database_path: str | Path, bootstrap_key: str, host: str = "12
         def do_DELETE(self) -> None:
             self._respond()
 
+        def do_PATCH(self) -> None:
+            self._respond()
+
         def _respond(self) -> None:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
