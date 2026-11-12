@@ -1,0 +1,26 @@
+# Keep the build context to just what the image needs.
+.git
+.github
+.noqte
+.vibe
+outputs
+tests
+uploads
+*.sqlite3
+*.sqlite3-journal
+__pycache__
+*.pyc
+.env
+.env.*
+!.env.example
+.venv
+venv
+node_modules
+*.log
+.DS_Store
+README.md
+ARCHITECTURE.md
+LICENSE
+Dockerfile
+docker-compose.yml
+.dockerignore

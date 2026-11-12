@@ -58,6 +58,47 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  docker:
+    name: Build and smoke-test the image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the image
+        run: docker build -t hoshyar:ci .
+
+      - name: Start the container
+        run: |
+          docker run -d --name hoshyar-ci \
+            -e HOSHYAR_BOOTSTRAP_KEY=ci-bootstrap-key-not-a-secret \
+            -p 8000:8000 hoshyar:ci
+
+      - name: Wait for health and exercise the API
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/health | grep -q '"status": "ok"'
+          curl -fsS http://127.0.0.1:8000/ | grep -q 'id="connection-form"'
+          created=$(curl -fsS -X POST http://127.0.0.1:8000/v1/tenants \
+            -H "X-Bootstrap-Key: ci-bootstrap-key-not-a-secret" \
+            -H 'Content-Type: application/json' -d '{"name":"دفتر آزمایشی"}')
+          echo "$created" | grep -q '"api_key"'
+          docker exec hoshyar-ci test -f /data/hoshyar.sqlite3
+
+      - name: Verify the container runs unprivileged
+        run: docker exec hoshyar-ci id -u | grep -q '^10001$'
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker logs hoshyar-ci || true
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f hoshyar-ci || true
+
   sbom:
     name: CycloneDX SBOM
     runs-on: ubuntu-latest

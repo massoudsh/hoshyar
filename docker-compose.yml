@@ -1,0 +1,28 @@
+services:
+  hoshyar:
+    build: .
+    image: hoshyar:local
+    restart: unless-stopped
+    # Bound to loopback: put a TLS-terminating reverse proxy in front for real use.
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      # Required. Put it in .env (gitignored) or the host environment, never in this file.
+      HOSHYAR_BOOTSTRAP_KEY: ${HOSHYAR_BOOTSTRAP_KEY:?set HOSHYAR_BOOTSTRAP_KEY before starting}
+      HOSHYAR_LOG_LEVEL: ${HOSHYAR_LOG_LEVEL:-info}
+    volumes:
+      - hoshyar-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  hoshyar-data:

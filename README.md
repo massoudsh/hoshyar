@@ -42,6 +42,26 @@ The response contains the office `id` and an `api_key`. Use the id and either th
 
 Full narrative (Persian): [`outputs/hoshyar-one-pager.md`](outputs/hoshyar-one-pager.md)
 
+## Run with Docker
+
+```sh
+export HOSHYAR_BOOTSTRAP_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+docker compose up --build
+```
+
+Or without Compose:
+
+```sh
+docker build -t hoshyar .
+docker run -d --name hoshyar -p 127.0.0.1:8000:8000 \
+  -e HOSHYAR_BOOTSTRAP_KEY="$HOSHYAR_BOOTSTRAP_KEY" \
+  -v hoshyar-data:/data hoshyar
+```
+
+The image is `python:3.12-slim` with no third-party packages, runs as UID 10001, and keeps state in the `/data` volume (`HOSHYAR_DATABASE_PATH=/data/hoshyar.sqlite3`). It listens on `0.0.0.0:8000` inside the container; Compose publishes it on loopback only, so put a TLS-terminating proxy in front before exposing it. The container handles `SIGTERM` and shuts down cleanly, and its `HEALTHCHECK` calls `/health`.
+
+CI builds the image on every push, starts it, and checks the health endpoint, the frontend, office creation, the persisted database file and the unprivileged user id.
+
 ## Architecture
 
 [`ARCHITECTURE.md`](ARCHITECTURE.md) documents the data flow, layer boundaries, consistency model and threat model.
@@ -52,6 +72,7 @@ Application code lives in this repository:
 
 - [`hoshyar/`](hoshyar/) — Python domain services, rule-based Persian intent extraction, SQLite persistence, and an HTTP API.
 - [`frontend/`](frontend/) — a Persian RTL interface served by the Python server, using plain HTML, CSS, and JavaScript.
+- [`Dockerfile`](Dockerfile) / [`docker-compose.yml`](docker-compose.yml) — a hardened image and a one-command local stack.
 - [`tests/`](tests/) — standard-library `unittest` coverage for services, API authentication and tenant isolation, channel ingestion, and HTTP endpoints.
 
 The prototype includes member sessions and role-aware views, lead assignment and follow-up queues, listing management, and explained lead–listing matches. Channel adapters normalize Telegram, WhatsApp, Divar, and Sheypoor payloads behind authenticated webhook endpoints; configuring providers and production deployment remains separate work.

@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import signal
 import time
 from uuid import uuid4
 
@@ -104,6 +105,12 @@ def main() -> None:
     port = int(os.environ.get("HOSHYAR_PORT", "8000"))
     server = create_server(database_path, bootstrap_key, host=host, port=port)
     log.info("server started", extra={"host": host, "port": server.server_port, "database": str(database_path)})
+
+    # Containers stop with SIGTERM; turn it into the same path as Ctrl-C so the socket closes cleanly.
+    def _stop(signum: int, frame: object) -> None:
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _stop)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
