@@ -1,0 +1,70 @@
+{
+  "description": "Golden set of conversational Persian lead messages. Each case declares the fields the rule-based extractor must get right; `null` means the field must stay empty. This is a regression gate, not evidence of real-world accuracy.",
+  "version": 1,
+  "cases": [
+    {
+      "text": "برای خرید فوری در پونک تا ۸ میلیارد می‌خوام",
+      "expected": {"purpose": "buy", "price": 8000000000, "neighborhood": "پونک", "urgency": "high"}
+    },
+    {
+      "text": "دنبال خونه خرید تو سعادت آباد تا ۱۲ میلیارد هستم",
+      "expected": {"purpose": "buy", "price": 12000000000, "neighborhood": "سعادت‌آباد"}
+    },
+    {
+      "text": "یه آپارتمان دوخوابه برای خرید در ونک تا ۹ میلیارد میخام",
+      "expected": {"purpose": "buy", "price": 9000000000, "neighborhood": "ونک"}
+    },
+    {
+      "text": "خرید خونه در شهرک غرب بودجه ۱۵ میلیارد",
+      "expected": {"purpose": "buy", "price": 15000000000, "neighborhood": "شهرک غرب"}
+    },
+    {
+      "text": "قصد خرید دارم در اکباتان با بودجه ۶ میلیارد",
+      "expected": {"purpose": "buy", "price": 6000000000, "neighborhood": "اکباتان"}
+    },
+    {
+      "text": "می‌خوام اجاره کنم تو ونک، رهن ۳۰۰ میلیون و اجاره ۲۰ میلیون",
+      "expected": {"purpose": "rent", "deposit": 300000000, "rent": 20000000, "price": null, "neighborhood": "ونک"}
+    },
+    {
+      "text": "برای اجاره در پونک تا ۵۰۰ میلیون رهن و ۲۵ میلیون اجاره",
+      "expected": {"purpose": "rent", "deposit": 500000000, "rent": 25000000, "price": null}
+    },
+    {
+      "text": "رهن کامل ۷۰۰ میلیون در نیاوران",
+      "expected": {"purpose": "rent", "deposit": 700000000, "rent": null, "neighborhood": "نیاوران"}
+    },
+    {
+      "text": "رهن ۴۰۰ میلیون، اجاره ۱۵ میلیون، در قیطریه",
+      "expected": {"purpose": "rent", "deposit": 400000000, "rent": 15000000}
+    },
+    {
+      "text": "اجاره یه واحد کوچیک تو نارمک حداکثر ۱۰ میلیون اجاره",
+      "expected": {"purpose": "rent", "rent": 10000000, "neighborhood": "نارمک"}
+    },
+    {
+      "text": "فوری نیاز به اجاره در تهرانپارس دارم",
+      "expected": {"purpose": "rent", "urgency": "high", "neighborhood": "تهرانپارس"}
+    },
+    {
+      "text": "من خونم رو می‌خوام بفروشم در زعفرانیه",
+      "expected": {"purpose": "sell", "neighborhood": "زعفرانیه"}
+    },
+    {
+      "text": "ملک دارم برای فروش در الهیه",
+      "expected": {"purpose": "sell", "neighborhood": "الهیه"}
+    },
+    {
+      "text": "سلام، اطلاعات می‌خواستم",
+      "expected": {"purpose": null, "price": null, "neighborhood": null, "urgency": null, "confidence": 0.0}
+    },
+    {
+      "text": "قیمت چند؟",
+      "expected": {"purpose": null, "price": null, "neighborhood": null}
+    }
+  ],
+  "thresholds": {
+    "purpose_accuracy": 1.0,
+    "field_accuracy": 0.95
+  }
+}
