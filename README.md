@@ -15,9 +15,36 @@ Brokerages lose revenue in **unanswered messages**, not only in closed deals: le
 3. **Lead SLA tracking** — who is waiting, how long, which advisor must act now  
 4. **File–buyer matching signals** for managers (not just post-hoc CRM records)
 
+## Quickstart
+
+Requires Python 3.10+ and nothing else — no third-party Python packages, no frontend build.
+
+```sh
+git clone https://github.com/massoudsh/hoshyar.git
+cd hoshyar
+cp .env.example .env          # then set HOSHYAR_BOOTSTRAP_KEY to a random value
+python -c "import secrets; print(secrets.token_urlsafe(32))"   # generate one
+set -a; . ./.env; set +a
+python -m hoshyar.server      # http://127.0.0.1:8000
+python -m unittest discover -s tests -v
+```
+
+Create an office with the bootstrap key, then sign in:
+
+```sh
+curl -s localhost:8000/v1/tenants -H "X-Bootstrap-Key: $HOSHYAR_BOOTSTRAP_KEY" \
+  -H 'Content-Type: application/json' -d '{"name": "املاک آفتاب"}'
+```
+
+The response contains the office `id` and an `api_key`. Use the id and either the key (manager view) or a team member's name and password (advisor view) in the web UI.
+
 ## Product one-pager
 
 Full narrative (Persian): [`outputs/hoshyar-one-pager.md`](outputs/hoshyar-one-pager.md)
+
+## Architecture
+
+[`ARCHITECTURE.md`](ARCHITECTURE.md) documents the data flow, layer boundaries, consistency model and threat model.
 
 ## Current implementation
 
@@ -41,11 +68,45 @@ python -m hoshyar.server
 
 The server binds to `127.0.0.1:8000` and serves both the frontend and API. `GET /health` is an unauthenticated health check. SQLite data defaults to `hoshyar.sqlite3`; set `HOSHYAR_DATABASE_PATH` to override its location. The current prototype is not a production deployment.
 
+### Configuration
+
+All settings are environment variables; see [`.env.example`](.env.example).
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `HOSHYAR_BOOTSTRAP_KEY` | yes | — | Authorizes office creation |
+| `HOSHYAR_DATABASE_PATH` | no | `hoshyar.sqlite3` | SQLite file |
+| `HOSHYAR_HOST` / `HOSHYAR_PORT` | no | `127.0.0.1` / `8000` | Bind address |
+| `HOSHYAR_LOG_LEVEL` | no | `info` | `debug`, `info`, `warning`, `error` |
+
 ### Run tests
 
 ```sh
 python -m unittest discover -s tests -v
 ```
+
+The suite covers the domain service, SQLite persistence, API authentication and tenant isolation, channel webhooks, HTTP endpoints and a golden-set regression check for Persian intent extraction.
+
+## Security
+
+- **Tenant isolation:** every domain read and write validates that the lead, agent or listing belongs to the authenticated tenant; cross-tenant access raises before any mutation.
+- **Credentials at rest:** office API keys and session tokens are SHA-256 digests; member passwords are PBKDF2-SHA256 (200 000 rounds, per-user salt). Nothing is compared with `==`.
+- **Roles:** an advisor sees only their assigned leads and cannot manage the team, listings or channel secrets; those actions require a manager session or the office key.
+- **Channel webhooks:** each channel gets its own secret, hashed at rest, supplied in `X-Channel-Secret`; deliveries are deduplicated by provider message id.
+- **Request handling:** 1 MB body cap, rejected `Transfer-Encoding` and malformed lengths, `nosniff` on responses, `no-store` on JSON.
+- **Secrets hygiene:** `.env` is gitignored, [`.env.example`](.env.example) lists every variable with no real values, and `gitleaks` runs on every push and pull request.
+
+Known gaps are listed in the threat model: no TLS termination, no rate limiting, no provider signature verification, passwords optional, sessions never expire, and SQLite is a single-process store.
+
+## Quality gates
+
+CI (`.github/workflows/ci.yml`) byte-compiles the package, runs the full test suite, syntax-checks the frontend, scans for committed secrets with gitleaks and publishes a CycloneDX SBOM. CodeQL runs on `main` and weekly; Dependabot watches pip and GitHub Actions.
+
+## Persian intent evaluation
+
+The rule-based extractor is scored against a checked-in golden set, [`outputs/evals/intent-golden.json`](outputs/evals/intent-golden.json), by `tests/test_intent_eval.py`. Purpose accuracy and per-field accuracy must stay above the thresholds in that file, so a change that regresses extraction fails CI instead of degrading silently. The set covers buy/rent/sell phrasing, Persian and Arabic digits, رهن and اجاره separation, neighborhoods and urgency.
+
+This is a regression gate over hand-written cases, **not** evidence of accuracy on real office conversations.
 
 ## Suggested stack (future roadmap, not implemented)
 
