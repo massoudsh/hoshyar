@@ -45,6 +45,28 @@ class HoshyarServiceTests(unittest.TestCase):
         self.assertEqual(dashboard["at_risk_leads"][0]["id"], lead.id)
         self.assertEqual(dashboard["unassigned_leads"][0]["id"], lead.id)
 
+    def test_quiet_leads_go_cold_but_converted_ones_do_not(self) -> None:
+        quiet = self.service.ingest_message(
+            self.office.id, "0911", "خرید در پونک", "sms", sent_at=NOW - timedelta(days=20)
+        )
+        recent = self.service.ingest_message(
+            self.office.id, "0912", "اجاره در ونک", "sms", sent_at=NOW - timedelta(days=2)
+        )
+        converted = self.service.ingest_message(
+            self.office.id, "0913", "خرید", "sms", sent_at=NOW - timedelta(days=30)
+        )
+        self.service.mark_converted(self.office.id, converted.id)
+
+        dashboard = self.service.dashboard(self.office.id, now=NOW)
+        self.assertEqual([lead["id"] for lead in dashboard["cold_leads"]], [quiet.id])
+        self.assertNotIn(recent.id, [lead["id"] for lead in dashboard["cold_leads"]])
+        self.assertEqual(dashboard["active_lead_count"], 2)
+
+        self.service.mark_cold(self.office.id, recent.id)
+        self.assertEqual(recent.state, "cold")
+        self.assertEqual(self.service.dashboard(self.office.id, now=NOW)["active_lead_count"], 1)
+        self.assertNotIn(recent.id, [item["lead"]["id"] for item in self.service.followups(self.office.id, now=NOW)])
+
     def test_agent_reply_removes_lead_from_at_risk(self) -> None:
         lead = self.service.ingest_message(
             self.office.id, "09120000000", "خرید در پونک", "telegram", sent_at=NOW - timedelta(hours=25)

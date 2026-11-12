@@ -132,6 +132,10 @@ class HoshyarApi:
                 )
                 self.store.save(service)
                 return 201, {"lead": self._json(lead)}
+            if method == "POST" and len(parts) == 6 and parts[3] == "leads" and parts[5] == "cold":
+                lead = service.mark_cold(tenant_id, parts[4])
+                self.store.save(service)
+                return 200, {"lead": self._json(lead)}
             if method == "GET" and parts[3:] == ["dashboard"]:
                 return 200, self._json(service.dashboard(tenant_id))
             if method == "POST" and parts[3:] == ["listings"]:

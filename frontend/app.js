@@ -106,6 +106,7 @@ function render() {
   renderFollowups();
   renderStats();
   renderRisks();
+  renderCold();
   renderLeads();
   renderListings();
   renderStale();
@@ -176,6 +177,33 @@ function renderRisks() {
     row.append(element('strong', '', text(lead.name || lead.contact)));
     row.append(element('span', 'tag', `وضعیت: ${text(lead.state)}`));
     row.append(element('span', 'tag', lead.assigned_agent_id ? 'مشاور دارد' : 'بدون مشاور'));
+    container.append(row);
+  }
+}
+
+function renderCold() {
+  const container = $('#cold-list');
+  container.replaceChildren();
+  const cold = state.data.dashboard.cold_leads || [];
+  if (!cold.length) return container.append(empty('مشتری سردی نیست.'));
+  for (const lead of cold) {
+    const row = element('div', 'lead-row');
+    row.append(element('strong', '', text(lead.name || lead.contact)));
+    row.append(element('span', 'tag', `وضعیت: ${text(lead.state)}`));
+    const button = element('button', 'outline-button', 'سرد کردن');
+    button.type = 'button';
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/leads/${encodeURIComponent(lead.id)}/cold`);
+        await loadWorkspace();
+        setStatus('مشتری سرد شد.');
+      } catch (error) {
+        setStatus(`سرد کردن انجام نشد: ${error.message}`, true);
+        button.disabled = false;
+      }
+    });
+    row.append(button);
     container.append(row);
   }
 }
@@ -598,6 +626,7 @@ $('#disconnect').addEventListener('click', async () => {
   $('#agent-form-wrap').hidden = false;
   $('#channel-panel').hidden = false;
   $('#channel-result').replaceChildren();
+  $('#cold-list').replaceChildren();
   resetListingForm($('#listing-form'));
   document.querySelectorAll('.nav-item[data-view="team"]').forEach((item) => { item.hidden = false; });
   $('#connection-panel').hidden = false;

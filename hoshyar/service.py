@@ -186,16 +186,24 @@ class HoshyarService:
                 stale.append({"listing": listing, "age_days": round(age_days, 1)})
         return sorted(stale, key=lambda item: -item["age_days"])
 
-    def dashboard(self, tenant_id: str, now: datetime | None = None, overdue_hours: int = 24) -> dict:
+    def dashboard(self, tenant_id: str, now: datetime | None = None, overdue_hours: int = 24,
+                  cold_after_days: int = 14) -> dict:
         self._tenant(tenant_id)
         now = now or datetime.now(timezone.utc)
         leads = self._tenant_leads(tenant_id)
         at_risk = [lead for lead in leads if self._is_overdue(lead, now, overdue_hours)]
+        cold = [lead for lead in leads if self._is_cold(lead, now, cold_after_days)]
         return {
             "active_lead_count": sum(lead.state not in {"cold", "converted"} for lead in leads),
             "at_risk_leads": [self._lead_summary(lead) for lead in at_risk],
             "unassigned_leads": [self._lead_summary(lead) for lead in leads if lead.assigned_agent_id is None],
+            "cold_leads": [self._lead_summary(lead) for lead in cold],
         }
+
+    def mark_cold(self, tenant_id: str, lead_id: str) -> Lead:
+        lead = self._lead(tenant_id, lead_id)
+        lead.state = "cold"
+        return lead
 
     def followups(self, tenant_id: str, agent_id: str | None = None, now: datetime | None = None,
                   overdue_hours: int = 24) -> list[dict]:
@@ -210,6 +218,8 @@ class HoshyarService:
         queue = []
         for lead in self._tenant_leads(tenant_id):
             if agent_id is not None and lead.assigned_agent_id != agent_id:
+                continue
+            if lead.state in {"cold", "converted"}:
                 continue
             if not lead.messages or lead.messages[-1].direction != "inbound":
                 continue
@@ -401,6 +411,13 @@ class HoshyarService:
                 delays.append((message.sent_at - waiting_since).total_seconds() / 3600)
                 waiting_since = None
         return delays
+
+    @staticmethod
+    def _is_cold(lead: Lead, now: datetime, cold_after_days: int) -> bool:
+        """A lead nobody has heard from for weeks is cold; a converted one is never cold."""
+        if lead.state in {"cold", "converted"} or not lead.messages:
+            return False
+        return lead.messages[-1].sent_at <= now - timedelta(days=cold_after_days)
 
     @staticmethod
     def _is_overdue(lead: Lead, now: datetime, overdue_hours: int) -> bool:
