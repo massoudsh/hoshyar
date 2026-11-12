@@ -255,10 +255,23 @@ class HoshyarService:
             elif not self._rent_fits(lead.intent.deposit, lead.intent.rent, listing):
                 continue
             score = 0
+            reasons = []
             if lead.intent.neighborhood and listing.neighborhood == lead.intent.neighborhood:
                 score += 2
+                reasons.append(f"same neighborhood: {listing.neighborhood}")
+            if deal_type == "sale" and lead.intent.price and listing.price:
+                # Closer to the ceiling is a better fit; a فایل at half the budget is rarely what was asked for.
+                headroom = 1 - listing.price / lead.intent.price
+                if headroom <= 0.2:
+                    score += 1
+                    reasons.append("price close to the stated budget")
+            elif deal_type == "rent":
+                if lead.intent.deposit and listing.deposit:
+                    reasons.append("deposit within budget")
+                if lead.intent.rent and listing.rent:
+                    reasons.append("monthly rent within budget")
             if score:
-                matches.append({"listing": listing, "score": score})
+                matches.append({"listing": listing, "score": score, "reasons": reasons})
         return sorted(matches, key=lambda match: -match["score"])
 
     @staticmethod

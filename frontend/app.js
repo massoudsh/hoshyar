@@ -257,6 +257,12 @@ function renderDetail(lead) {
   loadMatches(lead, matchList);
 }
 
+const REASONS = {
+  'price close to the stated budget': 'قیمت نزدیک بودجه',
+  'deposit within budget': 'رهن در محدودهٔ بودجه',
+  'monthly rent within budget': 'اجاره در محدودهٔ بودجه',
+};
+
 async function loadMatches(lead, container) {
   container.replaceChildren();
   try {
@@ -274,7 +280,10 @@ async function loadMatches(lead, container) {
       row.append(element('span', 'tag', listing.neighborhood));
       row.append(element('span', 'tag', listingLabel(listing)));
       row.append(element('span', 'tag', `${number(listing.bedrooms)} خواب`));
-      row.append(element('span', 'tag', match.score ? `امتیاز ${number(match.score)}` : 'بدون امتیاز محله'));
+      row.append(element('span', 'tag', `امتیاز ${number(match.score)}`));
+      if (match.reasons && match.reasons.length) {
+        row.append(element('span', 'tag', REASONS[match.reasons[0]] || match.reasons[0]));
+      }
       container.append(row);
     }
   } catch (error) {

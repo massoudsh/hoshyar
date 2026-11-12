@@ -132,6 +132,23 @@ class HoshyarServiceTests(unittest.TestCase):
         self.assertEqual(self.service.matching_listings(self.office.id, lead.id)[0]["listing"].id, match.id)
         self.assertEqual(self.service.pricing_alerts(self.office.id)[0]["listing"].id, match.id)
 
+    def test_matches_explain_why_and_rank_a_close_price_higher(self) -> None:
+        lead = self.service.ingest_message(
+            self.office.id, "0911", "برای خرید در پونک تا ۸ میلیارد", "telegram", sent_at=NOW
+        )
+        close = self.service.add_listing(self.office.id, "نزدیک بودجه", "پونک", 2, price=7_500_000_000)
+        far = self.service.add_listing(self.office.id, "ارزان", "پونک", 2, price=3_000_000_000)
+        elsewhere = self.service.add_listing(self.office.id, "ونک", "ونک", 2, price=7_800_000_000)
+
+        matches = self.service.matching_listings(self.office.id, lead.id)
+        self.assertEqual([match["listing"].id for match in matches], [close.id, far.id, elsewhere.id])
+        self.assertEqual(matches[0]["score"], 3)
+        self.assertIn("same neighborhood: پونک", matches[0]["reasons"])
+        self.assertIn("price close to the stated budget", matches[0]["reasons"])
+        self.assertEqual(matches[1]["score"], 2)
+        self.assertNotIn("price close to the stated budget", matches[1]["reasons"])
+        self.assertEqual(matches[2]["score"], 1)
+
     def test_rental_lead_matches_only_affordable_rentals(self) -> None:
         lead = self.service.ingest_message(
             self.office.id, "09120000000",
