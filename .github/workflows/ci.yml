@@ -71,9 +71,11 @@ jobs:
       - name: Start the container
         run: |
           # Generated per run: never a literal, so no committed value can be mistaken for a secret.
-          python -c 'import secrets; print(f"HOSHYAR_BOOTSTRAP_KEY={secrets.token_urlsafe(32)}")' >> "$GITHUB_ENV"
+          # $GITHUB_ENV only reaches later steps, so keep it in a shell variable for this one too.
+          key=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          echo "HOSHYAR_BOOTSTRAP_KEY=$key" >> "$GITHUB_ENV"
           docker run -d --name hoshyar-ci \
-            -e "HOSHYAR_BOOTSTRAP_KEY=${HOSHYAR_BOOTSTRAP_KEY}" \
+            -e "HOSHYAR_BOOTSTRAP_KEY=$key" \
             -p 8000:8000 hoshyar:ci
 
       - name: Wait for health and exercise the API
