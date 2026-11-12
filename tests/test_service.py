@@ -77,12 +77,14 @@ class HoshyarServiceTests(unittest.TestCase):
         self.assertEqual([item["lead"]["id"] for item in queue[:2]], [overdue.id, fresh.id])
         self.assertEqual(queue[0]["bucket"], "critical")
         self.assertEqual(queue[0]["match_count"], 1)
+        self.assertIsNone(queue[0]["owner_name"])
         self.assertEqual(queue[1]["bucket"], "unassigned")
         self.assertIn(assigned.id, [item["lead"]["id"] for item in queue])
         self.assertNotIn(answered.id, [item["lead"]["id"] for item in queue])
 
         only_mine = self.service.followups(self.office.id, agent_id=self.agent.id, now=NOW)
         self.assertEqual([item["lead"]["id"] for item in only_mine], [assigned.id])
+        self.assertEqual(only_mine[0]["owner_name"], "سارا")
 
     def test_listing_can_be_edited_and_deleted_within_its_tenant(self) -> None:
         listing = self.service.add_listing(self.office.id, "دوخوابه", "ونک", 2, price=5_000_000_000)

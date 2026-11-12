@@ -151,6 +151,7 @@ function renderFollowups() {
     row.append(element('span', `tag ${tone}`.trim(), label));
     row.append(element('span', 'tag', `${number(item.waiting_hours, ' ساعت')} انتظار`));
     row.append(element('span', 'tag', item.match_count ? `${number(item.match_count)} فایل قابل‌پیشنهاد` : 'بدون فایل مناسب'));
+    row.append(element('span', 'tag', item.owner_name ? `مسئول: ${item.owner_name}` : 'بدون مشاور'));
     row.addEventListener('click', () => {
       const lead = state.data.leads.find((candidate) => candidate.id === item.lead.id);
       if (!lead) return setStatus('این مشتری در نمای فعلی شما نیست.', true);

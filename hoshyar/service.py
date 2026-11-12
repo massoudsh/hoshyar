@@ -223,11 +223,13 @@ class HoshyarService:
             else:
                 bucket = "waiting"
             matches = len(self.matching_listings(tenant_id, lead.id))
+            owner = self.agents.get(lead.assigned_agent_id) if lead.assigned_agent_id else None
             queue.append({
                 "lead": self._lead_summary(lead),
                 "waiting_hours": round(waiting_hours, 1),
                 "bucket": bucket,
                 "match_count": matches,
+                "owner_name": owner.name if owner else None,
                 "score": self._followup_score(bucket, waiting_hours, matches),
             })
         return sorted(queue, key=lambda item: (-item["score"], -item["waiting_hours"]))
