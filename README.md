@@ -57,10 +57,13 @@ Or without Compose:
 
 ```sh
 docker build -t hoshyar .
+docker rm -f hoshyar 2>/dev/null || true   # drop a container left from an earlier run
 docker run -d --name hoshyar -p 127.0.0.1:8000:8000 \
   -e HOSHYAR_BOOTSTRAP_KEY="$HOSHYAR_BOOTSTRAP_KEY" \
   -v hoshyar-data:/data hoshyar
 ```
+
+Re-running `docker run --name hoshyar` fails while a container of that name exists: `Conflict. The container name "/hoshyar" is already in use`. The `docker rm -f` line clears it. It removes only the container, not the `hoshyar-data` volume, so offices and leads survive.
 
 The image is `python:3.12-slim` with no third-party packages, runs as UID 10001, and keeps state in the `/data` volume (`HOSHYAR_DATABASE_PATH=/data/hoshyar.sqlite3`). It listens on `0.0.0.0:8000` inside the container; Compose publishes it on loopback only, so put a TLS-terminating proxy in front before exposing it. The container handles `SIGTERM` and shuts down cleanly, and its `HEALTHCHECK` calls `/health`.
 
