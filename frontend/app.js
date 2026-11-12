@@ -433,11 +433,13 @@ $('#connection-form').addEventListener('submit', async (event) => {
   const tenant = String(data.tenant).trim();
   setStatus('در حال ورود…');
   try {
-    const session = await api('POST', '/v1/sessions', { tenant, name: String(data.name).trim() });
+    const password = String(data.password || '');
+    const session = await api('POST', '/v1/sessions', { tenant, name: String(data.name).trim(), ...(password ? { password } : {}) });
     state.tenant = tenant;
     state.token = session.token;
     fillOfficeId(tenant);
     form.elements.name.value = '';
+    form.elements.password.value = '';
     await loadWorkspace();
   } catch (error) {
     setStatus(`ورود انجام نشد: ${error.message}`, true);
@@ -487,8 +489,9 @@ $('#agent-form').addEventListener('submit', async (event) => {
   const data = fields(form);
   const name = String(data.name).trim();
   const role = data.role;
+  const password = String(data.password || '');
   try {
-    await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/agents`, { name, role });
+    await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/agents`, { name, role, ...(password ? { password } : {}) });
     await loadWorkspace();
     form.reset();
     setStatus(role === 'manager' ? 'مدیر افزوده شد.' : 'مشاور افزوده شد.');

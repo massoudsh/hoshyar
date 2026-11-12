@@ -35,6 +35,8 @@ class Agent:
     tenant_id: str
     name: str
     role: AgentRole = "agent"
+    # Salted PBKDF2 hash; the plain password is never stored or returned.
+    password_hash: str | None = None
 
 
 @dataclass

@@ -142,6 +142,43 @@ class HoshyarApiTests(unittest.TestCase):
         _, workspace = self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers=headers)
         self.assertEqual(workspace["listings"], [])
 
+    def test_member_with_a_password_must_supply_it_and_it_is_never_returned(self) -> None:
+        tenant_id, api_key = self.create_tenant()
+        headers = {"x-api-key": api_key}
+        status, created = self.request(
+            "POST", f"/v1/tenants/{tenant_id}/agents", {"name": "سارا", "password": "correct-horse"}, headers
+        )
+        self.assertEqual(status, 201)
+        self.assertNotIn("password_hash", created["agent"])
+        _, workspace = self.request("GET", f"/v1/tenants/{tenant_id}/workspace", headers=headers)
+        self.assertNotIn("password_hash", workspace["agents"][0])
+
+        self.assertEqual(self.request("POST", "/v1/sessions", {"tenant": tenant_id, "name": "سارا"})[0], 401)
+        self.assertEqual(
+            self.request("POST", "/v1/sessions", {"tenant": tenant_id, "name": "سارا", "password": "wrong"})[0], 401
+        )
+        status, session = self.request(
+            "POST", "/v1/sessions", {"tenant": tenant_id, "name": "سارا", "password": "correct-horse"}
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(session["member"]["role"], "agent")
+
+    def test_short_password_is_rejected_and_manager_can_reset_it(self) -> None:
+        tenant_id, api_key = self.create_tenant()
+        headers = {"x-api-key": api_key}
+        self.assertEqual(
+            self.request("POST", f"/v1/tenants/{tenant_id}/agents", {"name": "علی", "password": "short"}, headers)[0], 400
+        )
+        _, created = self.request("POST", f"/v1/tenants/{tenant_id}/agents", {"name": "علی"}, headers)
+        agent_id = created["agent"]["id"]
+        self.assertEqual(
+            self.request("POST", f"/v1/tenants/{tenant_id}/agents/{agent_id}/password", {"password": "new-secret-1"}, headers)[0],
+            200,
+        )
+        self.assertEqual(
+            self.request("POST", "/v1/sessions", {"tenant": tenant_id, "name": "علی", "password": "new-secret-1"})[0], 201
+        )
+
     def test_workspace_requires_the_tenant_key(self) -> None:
         tenant_id, _ = self.create_tenant()
         _, other_key = self.create_tenant()

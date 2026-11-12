@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
-from hashlib import sha256
+from hashlib import pbkdf2_hmac, sha256
 import hmac
 import json
 import secrets
@@ -40,6 +40,10 @@ class HoshyarApi:
             if method == "POST" and path == "/v1/sessions":
                 service = self.store.load()
                 agent = self._find_member(service, self._required(payload, "tenant"), self._required(payload, "name"))
+                password = payload.get("password")
+                if agent.password_hash is not None:
+                    if not isinstance(password, str) or not self._verify_password(password, agent.password_hash):
+                        raise PermissionError("wrong password")
                 token = secrets.token_urlsafe(32)
                 self.store.save_session(self._hash(token), agent.tenant_id, agent.id)
                 return 201, {"token": token, "tenant_id": agent.tenant_id, "member": self._json(agent)}
@@ -89,9 +93,22 @@ class HoshyarApi:
                 self.store.save(service)
                 return 200, {"lead": self._json(lead)}
             if method == "POST" and parts[3:] == ["agents"]:
-                agent = service.add_agent(tenant_id, self._required(payload, "name"), payload.get("role", "agent"))
+                password = payload.get("password")
+                if password is not None and (not isinstance(password, str) or len(password) < 8):
+                    raise ValueError("password must be at least 8 characters")
+                agent = service.add_agent(
+                    tenant_id, self._required(payload, "name"), payload.get("role", "agent"),
+                    self._hash_password(password) if password else None,
+                )
                 self.store.save(service)
                 return 201, {"agent": self._json(agent)}
+            if method == "POST" and len(parts) == 6 and parts[3] == "agents" and parts[5] == "password":
+                password = payload.get("password")
+                if not isinstance(password, str) or len(password) < 8:
+                    raise ValueError("password must be at least 8 characters")
+                agent = service.set_password(tenant_id, parts[4], self._hash_password(password))
+                self.store.save(service)
+                return 200, {"agent": self._json(agent)}
             if method == "GET" and parts[3:] == ["followups"]:
                 return 200, {"followups": self._json(service.followups(tenant_id))}
             if method == "POST" and len(parts) == 5 and parts[3] == "channels":
@@ -262,12 +279,29 @@ class HoshyarApi:
     def _hash(value: str) -> str:
         return sha256(value.encode()).hexdigest()
 
+    @staticmethod
+    def _hash_password(password: str) -> str:
+        salt = secrets.token_bytes(16)
+        digest = pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
+        return f"pbkdf2_sha256$200000${salt.hex()}${digest.hex()}"
+
+    @staticmethod
+    def _verify_password(password: str, stored: str) -> bool:
+        try:
+            algorithm, rounds, salt, digest = stored.split("$")
+            if algorithm != "pbkdf2_sha256":
+                return False
+            candidate = pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), int(rounds))
+        except (ValueError, TypeError):
+            return False
+        return hmac.compare_digest(candidate.hex(), digest)
+
     @classmethod
     def _json(cls, value: Any) -> Any:
         if is_dataclass(value):
             return cls._json(asdict(value))
         if isinstance(value, dict):
-            return {key: cls._json(item) for key, item in value.items()}
+            return {key: cls._json(item) for key, item in value.items() if key != "password_hash"}
         if isinstance(value, list):
             return [cls._json(item) for item in value]
         if isinstance(value, datetime):

@@ -28,12 +28,17 @@ class HoshyarService:
         self.tenants[tenant.id] = tenant
         return tenant
 
-    def add_agent(self, tenant_id: str, name: str, role: str = "agent") -> Agent:
+    def add_agent(self, tenant_id: str, name: str, role: str = "agent", password_hash: str | None = None) -> Agent:
         self._tenant(tenant_id)
         if role not in {"manager", "agent"}:
             raise ValueError("role must be manager or agent")
-        agent = Agent(id=new_id("agent"), tenant_id=tenant_id, name=name, role=role)
+        agent = Agent(id=new_id("agent"), tenant_id=tenant_id, name=name, role=role, password_hash=password_hash)
         self.agents[agent.id] = agent
+        return agent
+
+    def set_password(self, tenant_id: str, agent_id: str, password_hash: str) -> Agent:
+        agent = self._agent(tenant_id, agent_id)
+        agent.password_hash = password_hash
         return agent
 
     def manager_count(self, tenant_id: str) -> int:

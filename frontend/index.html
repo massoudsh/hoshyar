@@ -34,6 +34,7 @@
         <form id="connection-form" class="workspace-form">
           <label>شناسه دفتر<input name="tenant" required dir="ltr" autocomplete="off"></label>
           <label>نام عضو تیم<input name="name" required maxlength="120" autocomplete="off" placeholder="مثلاً سارا رضایی"></label>
+          <label>رمز<input name="password" type="password" autocomplete="current-password" placeholder="اگر برایتان تعیین شده"></label>
           <button class="primary-button" type="submit">ورود</button>
         </form>
         <details class="manager-login">
@@ -93,7 +94,7 @@
         </section>
         <section id="team-view" class="workspace-view" hidden>
           <section class="panel"><h2>تیم دفتر</h2><div id="agent-list"></div>
-            <div id="agent-form-wrap"><form id="agent-form" class="workspace-form"><label>نام عضو جدید<input name="name" required maxlength="120"></label><label>نقش<select name="role"><option value="agent">مشاور</option><option value="manager">مدیر</option></select></label><button type="submit" class="primary-button">افزودن عضو</button></form></div>
+            <div id="agent-form-wrap"><form id="agent-form" class="workspace-form"><label>نام عضو جدید<input name="name" required maxlength="120"></label><label>نقش<select name="role"><option value="agent">مشاور</option><option value="manager">مدیر</option></select></label><label>رمز (حداقل ۸ نویسه)<input name="password" type="password" minlength="8" autocomplete="new-password"></label><button type="submit" class="primary-button">افزودن عضو</button></form></div>
           </section>
         </section>
         <section id="reports-view" class="workspace-view" hidden><section class="panel"><h2>اندازه‌گیری پایلوت</h2><p>محاسبه بر اساس پیام‌ها و وضعیت‌های ثبت‌شده؛ نبود داده با صفرِ ساختگی جایگزین نمی‌شود.</p><div id="report"></div></section></section>
