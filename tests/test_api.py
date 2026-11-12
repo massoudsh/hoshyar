@@ -179,6 +179,34 @@ class HoshyarApiTests(unittest.TestCase):
             self.request("POST", "/v1/sessions", {"tenant": tenant_id, "name": "علی", "password": "new-secret-1"})[0], 201
         )
 
+    def test_performance_report_accepts_a_date_range(self) -> None:
+        tenant_id, api_key = self.create_tenant()
+        headers = {"x-api-key": api_key}
+        _, agent = self.request("POST", f"/v1/tenants/{tenant_id}/agents", {"name": "سارا"}, headers)
+        self.request(
+            "POST", f"/v1/tenants/{tenant_id}/messages",
+            {"contact": "0911", "body": "خرید", "channel": "manual"}, headers,
+        )
+        self.request(
+            "POST", f"/v1/tenants/{tenant_id}/messages",
+            {"contact": "0911", "body": "پاسخ", "channel": "manual", "direction": "outbound",
+             "agent_id": agent["agent"]["id"]}, headers,
+        )
+        status, report = self.request("GET", f"/v1/tenants/{tenant_id}/performance", headers=headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(report["office"]["replies"], 1)
+        self.assertEqual(report["agents"][0]["agent"]["name"], "سارا")
+        self.assertIsNotNone(report["agents"][0]["response_hours"])
+
+        status, _ = self.request(
+            "GET", f"/v1/tenants/{tenant_id}/performance?since=2026-10-01T00:00:00Z&until=2026-10-02T00:00:00Z",
+            headers=headers,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            self.request("GET", f"/v1/tenants/{tenant_id}/performance?since=not-a-date", headers=headers)[0], 400
+        )
+
     def test_workspace_requires_the_tenant_key(self) -> None:
         tenant_id, _ = self.create_tenant()
         _, other_key = self.create_tenant()

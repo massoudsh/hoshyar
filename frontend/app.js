@@ -111,6 +111,7 @@ function render() {
   renderListings();
   renderStale();
   renderAgents();
+  renderPerformance();
   renderReport();
 }
 
@@ -427,6 +428,41 @@ function parseAmount(raw) {
   return amount;
 }
 
+function performanceQuery() {
+  const days = $('#performance-form').elements.period.value;
+  if (days === 'all') return '';
+  const since = new Date(Date.now() - Number(days) * 86400000).toISOString();
+  return `?since=${encodeURIComponent(since)}`;
+}
+
+async function renderPerformance() {
+  const container = $('#performance-report');
+  container.replaceChildren();
+  container.append(empty('در حال خواندن گزارش…'));
+  try {
+    const report = await api('GET', `/v1/tenants/${encodeURIComponent(state.tenant)}/performance${performanceQuery()}`);
+    container.replaceChildren();
+    const office = report.office;
+    container.append(element('p', '', office.replies
+      ? `مجموع دفتر: ${number(office.response_hours, ' ساعت')} میانگین پاسخ در ${number(office.replies)} پاسخ`
+      : 'در این بازه پاسخی ثبت نشده است.'));
+    if (!report.agents.length) return container.append(empty('مشاوری ثبت نشده است.'));
+    for (const row of report.agents) {
+      const line = element('div', 'lead-row');
+      line.append(element('strong', '', row.agent.name));
+      line.append(element('span', 'tag', row.agent.role === 'manager' ? 'مدیر' : 'مشاور'));
+      line.append(element('span', 'tag', row.response_hours === null ? 'بدون پاسخ در بازه' : `میانگین پاسخ ${number(row.response_hours, ' ساعت')}`));
+      line.append(element('span', 'tag', `${number(row.replies)} پاسخ`));
+      line.append(element('span', 'tag', `${number(row.lead_count)} مشتری`));
+      line.append(element('span', 'tag', `${number(row.unanswered_count)} بی‌پاسخ`));
+      line.append(element('span', 'tag', `تبدیل ${percent(row.conversion_rate)}`));
+      container.append(line);
+    }
+  } catch (error) {
+    container.replaceChildren(empty(`گزارش خوانده نشد: ${error.message}`));
+  }
+}
+
 function renderAgents() {
   const container = $('#agent-list');
   container.replaceChildren();
@@ -598,6 +634,11 @@ $('#channel-form').addEventListener('submit', async (event) => {
   }
 });
 
+$('#performance-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  renderPerformance();
+});
+
 $('#refresh').addEventListener('click', async () => {
   try {
     await loadWorkspace();
@@ -627,6 +668,7 @@ $('#disconnect').addEventListener('click', async () => {
   $('#channel-panel').hidden = false;
   $('#channel-result').replaceChildren();
   $('#cold-list').replaceChildren();
+  $('#performance-report').replaceChildren();
   resetListingForm($('#listing-form'));
   document.querySelectorAll('.nav-item[data-view="team"]').forEach((item) => { item.hidden = false; });
   $('#connection-panel').hidden = false;

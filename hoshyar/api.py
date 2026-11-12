@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from hashlib import pbkdf2_hmac, sha256
 import hmac
 import json
 import secrets
 from typing import Any
+from urllib.parse import parse_qsl
 
 from .channels import CHANNELS, ChannelPayloadError, normalize
 from .service import HoshyarService
@@ -55,7 +56,8 @@ class HoshyarApi:
                     self.store.delete_session(self._hash(token))
                 return 200, {"status": "signed out"}
 
-            parts = path.strip("/").split("/")
+            route = path.split("?", 1)[0]
+            parts = route.strip("/").split("/")
             if len(parts) < 3 or parts[:2] != ["v1", "tenants"]:
                 return 404, {"error": "not found"}
             tenant_id = parts[2]
@@ -136,6 +138,11 @@ class HoshyarApi:
                 lead = service.mark_cold(tenant_id, parts[4])
                 self.store.save(service)
                 return 200, {"lead": self._json(lead)}
+            if method == "GET" and parts[3:] == ["performance"]:
+                query = self._query(path)
+                return 200, self._json(service.performance_report(
+                    tenant_id, since=self._moment(query.get("since")), until=self._moment(query.get("until")),
+                ))
             if method == "GET" and parts[3:] == ["dashboard"]:
                 return 200, self._json(service.dashboard(tenant_id))
             if method == "POST" and parts[3:] == ["listings"]:
@@ -230,6 +237,21 @@ class HoshyarApi:
         if not api_key or self.store.tenant_for_api_key(self._hash(api_key)) != tenant_id:
             raise PermissionError("invalid API key")
         return None
+
+    @staticmethod
+    def _query(path: str) -> dict[str, str]:
+        raw = path.split("?", 1)[1] if "?" in path else ""
+        return {key: value for key, value in parse_qsl(raw, keep_blank_values=False)}
+
+    @staticmethod
+    def _moment(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError("since and until must be ISO 8601 dates") from error
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
     @staticmethod
     def _body(body: bytes) -> dict[str, Any]:

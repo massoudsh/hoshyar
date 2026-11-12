@@ -228,6 +228,52 @@ class HoshyarServiceTests(unittest.TestCase):
         alerts = self.service.pricing_alerts(self.office.id)
         self.assertEqual([alert["listing"].title for alert in alerts], [])
 
+    def test_agent_response_time_credits_the_advisor_who_replied(self) -> None:
+        other = self.service.add_agent(self.office.id, "علی")
+        lead = self.service.ingest_message(
+            self.office.id, "0911", "خرید در پونک", "telegram", sent_at=NOW
+        )
+        self.service.ingest_message(
+            self.office.id, "0911", "در خدمتم", "telegram", "outbound", NOW + timedelta(hours=2), self.agent.id
+        )
+        self.service.ingest_message(
+            self.office.id, "0911", "سوال دیگر", "telegram", sent_at=NOW + timedelta(hours=3)
+        )
+        self.service.ingest_message(
+            self.office.id, "0911", "پاسخ", "telegram", "outbound", NOW + timedelta(hours=9), other.id
+        )
+
+        rows = {row["agent"].name: row for row in self.service.agent_performance(self.office.id)}
+        self.assertEqual(rows["سارا"]["response_hours"], 2.0)
+        self.assertEqual(rows["سارا"]["replies"], 1)
+        self.assertEqual(rows["علی"]["response_hours"], 6.0)
+        self.assertEqual(rows["علی"]["replies"], 1)
+        self.assertEqual(lead.assigned_agent_id, other.id)
+
+    def test_performance_report_filters_by_period_and_rejects_a_backwards_range(self) -> None:
+        self.service.ingest_message(self.office.id, "0911", "خرید", "sms", sent_at=NOW)
+        self.service.ingest_message(
+            self.office.id, "0911", "پاسخ", "sms", "outbound", NOW + timedelta(hours=1), self.agent.id
+        )
+        self.service.ingest_message(self.office.id, "0912", "اجاره", "sms", sent_at=NOW + timedelta(days=10))
+        self.service.ingest_message(
+            self.office.id, "0912", "پاسخ", "sms", "outbound", NOW + timedelta(days=10, hours=4), self.agent.id
+        )
+
+        early = self.service.performance_report(
+            self.office.id, since=NOW - timedelta(hours=1), until=NOW + timedelta(days=1)
+        )
+        self.assertEqual(early["office"]["replies"], 1)
+        self.assertEqual(early["office"]["response_hours"], 1.0)
+        self.assertEqual(early["agents"][0]["replies"], 1)
+
+        everything = self.service.performance_report(self.office.id)
+        self.assertEqual(everything["office"]["replies"], 2)
+        self.assertEqual(everything["office"]["response_hours"], 2.5)
+
+        with self.assertRaisesRegex(ValueError, "since must be before until"):
+            self.service.performance_report(self.office.id, since=NOW, until=NOW - timedelta(days=1))
+
     def test_measurement_performance_and_referrals(self) -> None:
         lead = self.service.ingest_message(
             self.office.id, "09120000000", "فروش ملک در نیاوران", "instagram", sent_at=NOW

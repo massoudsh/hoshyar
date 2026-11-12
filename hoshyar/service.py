@@ -310,21 +310,53 @@ class HoshyarService:
         self._tenant(tenant_id)
         self.baselines[tenant_id] = {"response_hours": response_hours, "conversion_rate": conversion_rate}
 
-    def agent_performance(self, tenant_id: str) -> list[dict]:
+    def agent_performance(self, tenant_id: str, since: datetime | None = None,
+                          until: datetime | None = None) -> list[dict]:
+        """Per-advisor numbers for a period; a reply counts for the advisor who sent it."""
         self._tenant(tenant_id)
+        if since and until and since > until:
+            raise ValueError("since must be before until")
         reports = []
+        tenant_leads = self._tenant_leads(tenant_id)
         for agent in self.agents.values():
             if agent.tenant_id != tenant_id:
                 continue
-            leads = [lead for lead in self._tenant_leads(tenant_id) if lead.assigned_agent_id == agent.id]
+            leads = [lead for lead in tenant_leads if lead.assigned_agent_id == agent.id]
+            # Scan every lead, not just the ones assigned now: a reassigned lead still credits
+            # the advisor who actually sent each reply.
+            delays = [
+                delay for lead in tenant_leads
+                for delay in self._response_delays(lead, since=since, until=until, agent_id=agent.id)
+            ]
             converted = sum(lead.state == "converted" for lead in leads)
             reports.append({
                 "agent": agent,
                 "lead_count": len(leads),
                 "unanswered_count": sum(lead.state == "unanswered" for lead in leads),
                 "conversion_rate": converted / len(leads) if leads else 0.0,
+                "response_hours": mean(delays) if delays else None,
+                "replies": len(delays),
             })
         return reports
+
+    def performance_report(self, tenant_id: str, since: datetime | None = None,
+                           until: datetime | None = None) -> dict:
+        """A period report a manager can hand over: office totals plus one row per advisor."""
+        self._tenant(tenant_id)
+        rows = self.agent_performance(tenant_id, since=since, until=until)
+        office_delays = [
+            delay for lead in self._tenant_leads(tenant_id)
+            for delay in self._response_delays(lead, since=since, until=until)
+        ]
+        return {
+            "since": since,
+            "until": until,
+            "office": {
+                "response_hours": mean(office_delays) if office_delays else None,
+                "replies": len(office_delays),
+            },
+            "agents": rows,
+        }
 
     def enroll_pilot(self, tenant_id: str) -> None:
         self._tenant(tenant_id)
@@ -401,13 +433,28 @@ class HoshyarService:
         return [lead for lead in self.leads.values() if lead.tenant_id == tenant_id]
 
     @staticmethod
-    def _response_delays(lead: Lead) -> list[float]:
+    def _response_delays(lead: Lead, since: datetime | None = None, until: datetime | None = None,
+                         agent_id: str | None = None) -> list[float]:
+        """Hours between an inbound message and the reply that answered it.
+
+        A reply is attributed to the advisor who sent it, so a lead reassigned mid-conversation
+        credits each reply to the right person. `since`/`until` filter on the reply time.
+        """
         delays: list[float] = []
         waiting_since: datetime | None = None
         for message in lead.messages:
             if message.direction == "inbound":
                 waiting_since = waiting_since or message.sent_at
             elif waiting_since is not None:
+                if agent_id is not None and message.agent_id != agent_id:
+                    waiting_since = None
+                    continue
+                if since is not None and message.sent_at < since:
+                    waiting_since = None
+                    continue
+                if until is not None and message.sent_at > until:
+                    waiting_since = None
+                    continue
                 delays.append((message.sent_at - waiting_since).total_seconds() / 3600)
                 waiting_since = None
         return delays
