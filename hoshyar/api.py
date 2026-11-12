@@ -8,6 +8,7 @@ import json
 import secrets
 from typing import Any
 
+from .channels import CHANNELS, ChannelPayloadError, normalize
 from .service import HoshyarService
 from .store import SqliteStore
 
@@ -42,6 +43,8 @@ class HoshyarApi:
                 token = secrets.token_urlsafe(32)
                 self.store.save_session(self._hash(token), agent.tenant_id, agent.id)
                 return 201, {"token": token, "tenant_id": agent.tenant_id, "member": self._json(agent)}
+            if method == "POST" and path.startswith("/v1/channels/"):
+                return self._receive_channel(path, headers, payload)
             if method == "DELETE" and path == "/v1/sessions":
                 token = headers.get("x-session-token", "")
                 if token:
@@ -57,7 +60,9 @@ class HoshyarApi:
             service._tenant(tenant_id)
             member = service._agent(tenant_id, member_id) if member_id else None
             if member is not None and member.role != "manager":
-                if parts[3:] in (["agents"], ["listings"], ["baselines"], ["referrals"]):
+                if parts[3:] in (["agents"], ["listings"], ["baselines"], ["referrals"]) or (
+                    len(parts) == 5 and parts[3] == "channels"
+                ):
                     raise PermissionError("manager role required")
                 if len(parts) == 6 and parts[3] == "leads" and parts[5] == "assignment":
                     raise PermissionError("manager role required")
@@ -89,6 +94,13 @@ class HoshyarApi:
                 return 201, {"agent": self._json(agent)}
             if method == "GET" and parts[3:] == ["followups"]:
                 return 200, {"followups": self._json(service.followups(tenant_id))}
+            if method == "POST" and len(parts) == 5 and parts[3] == "channels":
+                channel = parts[4]
+                if channel not in CHANNELS:
+                    raise ValueError(f"channel must be one of {', '.join(CHANNELS)}")
+                secret = secrets.token_urlsafe(32)
+                self.store.save_channel_secret(tenant_id, channel, self._hash(secret))
+                return 201, {"channel": channel, "secret": secret}
             if method == "GET" and parts[3:] == ["me"]:
                 return 200, {"viewer": self._json(member)}
             if method == "POST" and parts[3:] == ["messages"]:
@@ -123,8 +135,35 @@ class HoshyarApi:
             return 404, {"error": "not found"}
         except PermissionError as error:
             return 401, {"error": str(error)}
+        except ChannelPayloadError as error:
+            return 422, {"error": str(error)}
         except ValueError as error:
             return 400, {"error": str(error)}
+
+    def _receive_channel(self, path: str, headers: dict[str, str], payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Accept a channel webhook: /v1/channels/{tenant_id}/{channel}, authenticated by that channel's secret."""
+        parts = path.strip("/").split("/")
+        if len(parts) != 4:
+            return 404, {"error": "not found"}
+        _, _, tenant_id, channel = parts
+        expected = self.store.channel_secret_hash(tenant_id, channel)
+        supplied = headers.get("x-channel-secret", "")
+        if expected is None or not supplied or not hmac.compare_digest(self._hash(supplied), expected):
+            raise PermissionError("invalid channel secret")
+        message = normalize(channel, payload)
+        if message["external_id"]:
+            existing = self.store.delivered_lead(tenant_id, channel, message["external_id"])
+            if existing:
+                return 200, {"lead_id": existing, "duplicate": True}
+        service = self.store.load()
+        lead = service.ingest_message(
+            tenant_id=tenant_id, contact=message["contact"], body=message["body"], channel=channel,
+            sent_at=message["sent_at"], name=message["name"],
+        )
+        self.store.save(service)
+        if message["external_id"]:
+            self.store.record_delivery(tenant_id, channel, message["external_id"], lead.id)
+        return 201, {"lead_id": lead.id, "duplicate": False}
 
     @staticmethod
     def _find_member(service: HoshyarService, tenant_id: str, name: str) -> Any:

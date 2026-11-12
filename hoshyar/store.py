@@ -27,6 +27,12 @@ class SqliteStore:
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS member_sessions (token_hash TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, agent_id TEXT NOT NULL)"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS channel_secrets (tenant_id TEXT NOT NULL, channel TEXT NOT NULL, secret_hash TEXT NOT NULL, PRIMARY KEY (tenant_id, channel))"
+            )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS channel_deliveries (tenant_id TEXT NOT NULL, channel TEXT NOT NULL, external_id TEXT NOT NULL, lead_id TEXT NOT NULL, PRIMARY KEY (tenant_id, channel, external_id))"
+            )
 
     def load(self) -> HoshyarService:
         with self._connection() as connection:
@@ -99,6 +105,35 @@ class SqliteStore:
     def delete_session(self, token_hash: str) -> None:
         with self._connection() as connection:
             connection.execute("DELETE FROM member_sessions WHERE token_hash = ?", (token_hash,))
+
+    def save_channel_secret(self, tenant_id: str, channel: str, secret_hash: str) -> None:
+        with self._connection() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO channel_secrets (tenant_id, channel, secret_hash) VALUES (?, ?, ?)",
+                (tenant_id, channel, secret_hash),
+            )
+
+    def channel_secret_hash(self, tenant_id: str, channel: str) -> str | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT secret_hash FROM channel_secrets WHERE tenant_id = ? AND channel = ?", (tenant_id, channel)
+            ).fetchone()
+        return row[0] if row else None
+
+    def delivered_lead(self, tenant_id: str, channel: str, external_id: str) -> str | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT lead_id FROM channel_deliveries WHERE tenant_id = ? AND channel = ? AND external_id = ?",
+                (tenant_id, channel, external_id),
+            ).fetchone()
+        return row[0] if row else None
+
+    def record_delivery(self, tenant_id: str, channel: str, external_id: str, lead_id: str) -> None:
+        with self._connection() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO channel_deliveries (tenant_id, channel, external_id, lead_id) VALUES (?, ?, ?, ?)",
+                (tenant_id, channel, external_id, lead_id),
+            )
 
     def tenant_for_api_key(self, key_hash: str) -> str | None:
         with self._connection() as connection:

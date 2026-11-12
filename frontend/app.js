@@ -91,7 +91,7 @@ async function loadWorkspace() {
     ? 'نمای مدیر: همه مشتریان و فایل‌های دفتر'
     : `نمای مشاور: ${viewer.name} — فقط مشتریان خودتان`;
   document.querySelectorAll('.nav-item[data-view="team"]').forEach((item) => { item.hidden = !isManager; });
-  document.querySelectorAll('#listing-form, #agent-form-wrap').forEach((node) => { node.hidden = !isManager; });
+  document.querySelectorAll('#listing-form, #agent-form-wrap, #channel-panel').forEach((node) => { node.hidden = !isManager; });
   if (!isManager && !views[currentView()]) showView('followups');
   setStatus('دفتر متصل است. اطلاعات این صفحه از سرور خوانده شده است.');
   render();
@@ -151,8 +151,10 @@ function renderFollowups() {
     row.append(element('span', 'tag', `${number(item.waiting_hours, ' ساعت')} انتظار`));
     row.append(element('span', 'tag', item.match_count ? `${number(item.match_count)} فایل قابل‌پیشنهاد` : 'بدون فایل مناسب'));
     row.addEventListener('click', () => {
+      const lead = state.data.leads.find((candidate) => candidate.id === item.lead.id);
+      if (!lead) return setStatus('این مشتری در نمای فعلی شما نیست.', true);
       showView('inbox');
-      renderDetail(state.data.leads.find((candidate) => candidate.id === item.lead.id) || lead);
+      renderDetail(lead);
     });
     container.append(row);
   }
@@ -467,6 +469,24 @@ $('#listing-form').addEventListener('submit', async (event) => {
   }
 });
 
+$('#channel-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const channel = new FormData(form).get('channel');
+  const result = $('#channel-result');
+  result.replaceChildren();
+  try {
+    const response = await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/channels/${encodeURIComponent(channel)}`);
+    const url = `${location.origin}/v1/channels/${encodeURIComponent(state.tenant)}/${encodeURIComponent(channel)}`;
+    result.append(element('p', '', `آدرس webhook: ${url}`));
+    result.append(element('p', '', `سرصفحهٔ X-Channel-Secret: ${response.secret}`));
+    result.append(element('p', 'empty', 'این کلید فقط همین یک بار نمایش داده می‌شود؛ آن را در تنظیمات کانال ذخیره کنید.'));
+    setStatus('کلید کانال ساخته شد.');
+  } catch (error) {
+    setStatus(`کلید کانال ساخته نشد: ${error.message}`, true);
+  }
+});
+
 $('#refresh').addEventListener('click', async () => {
   try {
     await loadWorkspace();
@@ -493,6 +513,8 @@ $('#disconnect').addEventListener('click', async () => {
   $('#lead-detail').hidden = true;
   $('#viewer-badge').textContent = '';
   $('#agent-form-wrap').hidden = false;
+  $('#channel-panel').hidden = false;
+  $('#channel-result').replaceChildren();
   document.querySelectorAll('.nav-item[data-view="team"]').forEach((item) => { item.hidden = false; });
   $('#connection-panel').hidden = false;
   $('#refresh').disabled = true;
