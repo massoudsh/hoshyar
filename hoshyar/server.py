@@ -4,13 +4,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import time
+from uuid import uuid4
 
 from .api import HoshyarApi
 from .store import SqliteStore
+from .telemetry import configure, get_logger, request_id
 
 
 def create_server(database_path: str | Path, bootstrap_key: str, host: str = "127.0.0.1", port: int = 8000) -> ThreadingHTTPServer:
     api = HoshyarApi(SqliteStore(database_path), bootstrap_key)
+    log = get_logger()
 
     class RequestHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -39,6 +43,24 @@ def create_server(database_path: str | Path, bootstrap_key: str, host: str = "12
             self._respond()
 
         def _respond(self) -> None:
+            token = request_id.set(uuid4().hex[:16])
+            started = time.monotonic()
+            try:
+                self._dispatch()
+            finally:
+                elapsed_ms = round((time.monotonic() - started) * 1000, 1)
+                log.info(
+                    "request",
+                    extra={
+                        "method": self.command,
+                        "path": self.path,
+                        "status": getattr(self, "_status", None),
+                        "duration_ms": elapsed_ms,
+                    },
+                )
+                request_id.reset(token)
+
+        def _dispatch(self) -> None:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
@@ -56,6 +78,7 @@ def create_server(database_path: str | Path, bootstrap_key: str, host: str = "12
             self._send(status, payload)
 
         def _send(self, status: int, payload: dict) -> None:
+            self._status = status
             encoded = json.dumps(payload, ensure_ascii=False).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -72,11 +95,21 @@ def create_server(database_path: str | Path, bootstrap_key: str, host: str = "12
 
 
 def main() -> None:
+    log = configure(os.environ.get("HOSHYAR_LOG_LEVEL", "info"))
     bootstrap_key = os.environ.get("HOSHYAR_BOOTSTRAP_KEY")
     if not bootstrap_key:
         raise SystemExit("HOSHYAR_BOOTSTRAP_KEY must be set")
     database_path = os.environ.get("HOSHYAR_DATABASE_PATH", "hoshyar.sqlite3")
-    create_server(database_path, bootstrap_key).serve_forever()
+    host = os.environ.get("HOSHYAR_HOST", "127.0.0.1")
+    port = int(os.environ.get("HOSHYAR_PORT", "8000"))
+    server = create_server(database_path, bootstrap_key, host=host, port=port)
+    log.info("server started", extra={"host": host, "port": server.server_port, "database": str(database_path)})
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        log.info("server stopped")
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":
