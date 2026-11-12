@@ -19,14 +19,16 @@ Brokerages lose revenue in **unanswered messages**, not only in closed deals: le
 
 Requires Python 3.10+ and nothing else — no third-party Python packages, no frontend build.
 
+Use `python3` on systems where `python` is not on the PATH.
+
 ```sh
 git clone https://github.com/massoudsh/hoshyar.git
 cd hoshyar
 cp .env.example .env          # then set HOSHYAR_BOOTSTRAP_KEY to a random value
-python -c "import secrets; print(secrets.token_urlsafe(32))"   # generate one
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"   # generate one
 set -a; . ./.env; set +a
-python -m hoshyar.server      # http://127.0.0.1:8000
-python -m unittest discover -s tests -v
+python3 -m hoshyar.server     # http://127.0.0.1:8000
+python3 -m unittest discover -s tests -v
 ```
 
 Create an office with the bootstrap key, then sign in:
@@ -44,8 +46,10 @@ Full narrative (Persian): [`outputs/hoshyar-one-pager.md`](outputs/hoshyar-one-p
 
 ## Run with Docker
 
+Run these from the repository root — `docker compose` reads `docker-compose.yml` from the current directory.
+
 ```sh
-export HOSHYAR_BOOTSTRAP_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export HOSHYAR_BOOTSTRAP_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 docker compose up --build
 ```
 
@@ -84,7 +88,7 @@ Requires Python 3.10 or newer; no third-party Python packages or frontend build 
 From the repository root:
 
 ```sh
-python -m hoshyar.server
+python3 -m hoshyar.server
 ```
 
 The server binds to `127.0.0.1:8000` and serves both the frontend and API. `GET /health` is an unauthenticated health check. SQLite data defaults to `hoshyar.sqlite3`; set `HOSHYAR_DATABASE_PATH` to override its location. The current prototype is not a production deployment.
@@ -103,7 +107,7 @@ All settings are environment variables; see [`.env.example`](.env.example).
 ### Run tests
 
 ```sh
-python -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v
 ```
 
 The suite covers the domain service, SQLite persistence, API authentication and tenant isolation, channel webhooks, HTTP endpoints and a golden-set regression check for Persian intent extraction.
