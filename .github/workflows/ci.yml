@@ -70,8 +70,10 @@ jobs:
 
       - name: Start the container
         run: |
+          # Generated per run: never a literal, so no committed value can be mistaken for a secret.
+          python -c 'import secrets; print(f"HOSHYAR_BOOTSTRAP_KEY={secrets.token_urlsafe(32)}")' >> "$GITHUB_ENV"
           docker run -d --name hoshyar-ci \
-            -e HOSHYAR_BOOTSTRAP_KEY=ci-bootstrap-key-not-a-secret \
+            -e "HOSHYAR_BOOTSTRAP_KEY=${HOSHYAR_BOOTSTRAP_KEY}" \
             -p 8000:8000 hoshyar:ci
 
       - name: Wait for health and exercise the API
@@ -83,7 +85,7 @@ jobs:
           curl -fsS http://127.0.0.1:8000/health | grep -q '"status": "ok"'
           curl -fsS http://127.0.0.1:8000/ | grep -q 'id="connection-form"'
           created=$(curl -fsS -X POST http://127.0.0.1:8000/v1/tenants \
-            -H "X-Bootstrap-Key: ci-bootstrap-key-not-a-secret" \
+            -H "X-Bootstrap-Key: ${HOSHYAR_BOOTSTRAP_KEY}" \
             -H 'Content-Type: application/json' -d '{"name":"دفتر آزمایشی"}')
           echo "$created" | grep -q '"api_key"'
           docker exec hoshyar-ci test -f /data/hoshyar.sqlite3
