@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import sqlite3
 
-from .models import Agent, Intent, Lead, Listing, Message, Tenant
+from .models import Agent, Intent, Lead, Listing, Message, SavedSearch, Tenant, Viewing
 from .service import HoshyarService
 
 
@@ -44,6 +44,8 @@ class SqliteStore:
         service.tenants = {item["id"]: Tenant(**item) for item in data["tenants"]}
         service.agents = {item["id"]: Agent(**{"role": "agent", **item}) for item in data["agents"]}
         service.listings = {item["id"]: self._listing(item) for item in data["listings"]}
+        service.saved_searches = {item["id"]: self._saved_search(item) for item in data.get("saved_searches", [])}
+        service.viewings = {item["id"]: self._viewing(item) for item in data.get("viewings", [])}
         service.baselines = data["baselines"]
         service.referrals = defaultdict(set, {key: set(value) for key, value in data["referrals"].items()})
         service.pilot_tenants = set(data["pilot_tenants"])
@@ -65,13 +67,30 @@ class SqliteStore:
             value = item.get(name)
             return datetime.fromisoformat(value) if value else None
 
+        history = [
+            {**change, "at": datetime.fromisoformat(change["at"])}
+            for change in item.get("price_history", [])
+        ]
         return Listing(
             id=item["id"], tenant_id=item["tenant_id"], title=item["title"],
             neighborhood=item["neighborhood"], bedrooms=item["bedrooms"],
             deal_type=item.get("deal_type", "sale"), price=item.get("price"),
-            deposit=item.get("deposit"), rent=item.get("rent"),
+            deposit=item.get("deposit"), rent=item.get("rent"), area=item.get("area"),
             created_at=moment("created_at"), updated_at=moment("updated_at"),
+            verified_at=moment("verified_at"), verified_by=item.get("verified_by"),
+            price_history=history,
         )
+
+    @staticmethod
+    def _saved_search(item: dict) -> SavedSearch:
+        item = {**item}
+        item["created_at"] = datetime.fromisoformat(item["created_at"]) if item.get("created_at") else None
+        return SavedSearch(**item)
+
+    @staticmethod
+    def _viewing(item: dict) -> Viewing:
+        item = {**item, "starts_at": datetime.fromisoformat(item["starts_at"])}
+        return Viewing(**item)
 
     def save(self, service: HoshyarService) -> None:
         payload = json.dumps({
@@ -79,6 +98,8 @@ class SqliteStore:
             "agents": [asdict(item) for item in service.agents.values()],
             "leads": [asdict(item) for item in service.leads.values()],
             "listings": [asdict(item) for item in service.listings.values()],
+            "saved_searches": [asdict(item) for item in service.saved_searches.values()],
+            "viewings": [asdict(item) for item in service.viewings.values()],
             "baselines": service.baselines,
             "referrals": {key: sorted(value) for key, value in service.referrals.items()},
             "pilot_tenants": sorted(service.pilot_tenants),

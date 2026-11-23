@@ -86,6 +86,9 @@ class HoshyarApi:
                     ),
                     "agents": [agent for agent in service.agents.values() if agent.tenant_id == tenant_id],
                     "listings": [listing for listing in service.listings.values() if listing.tenant_id == tenant_id],
+                    "saved_searches": [search for search in service.saved_searches.values() if search.tenant_id == tenant_id],
+                    "viewings": [viewing for viewing in service.viewings.values() if viewing.tenant_id == tenant_id],
+                    "reminders": service.reminders(tenant_id),
                     "dashboard": service.dashboard(tenant_id),
                     "performance": service.agent_performance(tenant_id),
                     "measurement": service.measurement_report(tenant_id),
@@ -155,9 +158,92 @@ class HoshyarApi:
                     price=self._optional_integer(payload, "price"),
                     deposit=self._optional_integer(payload, "deposit"),
                     rent=self._optional_integer(payload, "rent"),
+                    area=self._optional_number(payload, "area"),
+                )
+                alerts = service.new_listing_alerts(listing.id)
+                self.store.save(service)
+                return 201, {"listing": self._json(listing), "alerts": self._json(alerts)}
+            if method == "POST" and len(parts) == 6 and parts[3] == "listings" and parts[5] == "touch":
+                listing = service.touch_listing(tenant_id, parts[4])
+                self.store.save(service)
+                return 200, {"listing": self._json(listing)}
+            if method == "POST" and len(parts) == 6 and parts[3] == "listings" and parts[5] == "verify":
+                agent_id = self._required(payload, "agent_id") if "agent_id" in payload else member_id
+                if not agent_id:
+                    raise ValueError("agent_id is required for a manager key")
+                listing = service.verify_listing(tenant_id, parts[4], agent_id)
+                self.store.save(service)
+                return 200, {"listing": self._json(listing)}
+            if method == "GET" and parts[3:] == ["compare"]:
+                ids = [item for item in self._query(path).get("ids", "").split(",") if item]
+                return 200, {"listings": self._json(service.compare_listings(tenant_id, ids))}
+            if method == "GET" and parts[3:] == ["market-trend"]:
+                query = self._query(path)
+                months = int(query.get("months", "6")) if query.get("months", "6").isdigit() else 0
+                return 200, self._json(service.market_trend(
+                    tenant_id, neighborhood=query.get("neighborhood") or None, months=months,
+                ))
+            if method == "GET" and parts[3:] == ["suspicious-listings"]:
+                return 200, {"suspicious": self._json(service.suspicious_listings(tenant_id))}
+            if method == "GET" and parts[3:] == ["source-health"]:
+                return 200, self._json(service.source_health(tenant_id))
+            if method == "GET" and parts[3:] == ["review-queue"]:
+                query = self._query(path)
+                days = int(query.get("days", "14")) if query.get("days", "14").isdigit() else 0
+                return 200, {"queue": self._json(service.review_queue(tenant_id, days=days))}
+            if method == "POST" and parts[3:] == ["budget"]:
+                return 200, self._json(service.budget(
+                    payload.get("deal_type", "sale"),
+                    max_price=self._optional_integer(payload, "max_price"),
+                    max_deposit=self._optional_integer(payload, "max_deposit"),
+                    max_rent=self._optional_integer(payload, "max_rent"),
+                    savings=self._optional_integer(payload, "savings") or 0,
+                    monthly_income=self._optional_integer(payload, "monthly_income"),
+                ))
+            if method == "POST" and parts[3:] == ["commission"]:
+                return 200, self._json(service.quote_commission(
+                    payload.get("deal_type", "sale"),
+                    price=self._optional_integer(payload, "price"),
+                    deposit=self._optional_integer(payload, "deposit"),
+                    rent=self._optional_integer(payload, "rent"),
+                ))
+            if method == "POST" and parts[3:] == ["convert-rahn"]:
+                return 200, self._json(service.convert_rahn(
+                    self._integer(payload, "deposit"), self._integer(payload, "rent"),
+                    target_deposit=self._optional_integer(payload, "target_deposit"),
+                    target_rent=self._optional_integer(payload, "target_rent"),
+                ))
+            if method == "GET" and parts[3:] == ["saved-searches"]:
+                return 200, {"saved_searches": self._json([
+                    search for search in service.saved_searches.values() if search.tenant_id == tenant_id
+                ])}
+            if method == "POST" and parts[3:] == ["saved-searches"]:
+                search = service.add_saved_search(
+                    tenant_id, self._required(payload, "name"), payload.get("deal_type", "sale"),
+                    max_price=self._optional_integer(payload, "max_price"),
+                    max_deposit=self._optional_integer(payload, "max_deposit"),
+                    max_rent=self._optional_integer(payload, "max_rent"),
+                    neighborhood=payload.get("neighborhood"), bedrooms=self._optional_integer(payload, "bedrooms"),
+                    lead_id=payload.get("lead_id"),
                 )
                 self.store.save(service)
-                return 201, {"listing": self._json(listing)}
+                return 201, {"saved_search": self._json(search)}
+            if method == "GET" and len(parts) == 6 and parts[3] == "saved-searches" and parts[5] == "matches":
+                return 200, {"matches": self._json(service.matches_for_search(tenant_id, parts[4]))}
+            if method == "POST" and parts[3:] == ["viewings"]:
+                viewing = service.schedule_viewing(
+                    tenant_id, self._required(payload, "lead_id"), self._required(payload, "listing_id"),
+                    self._moment(self._required(payload, "starts_at")),
+                    agent_id=payload.get("agent_id", member_id), note=payload.get("note"),
+                )
+                self.store.save(service)
+                return 201, {"viewing": self._json(viewing)}
+            if method == "PATCH" and len(parts) == 5 and parts[3] == "viewings":
+                viewing = service.update_viewing(tenant_id, parts[4], payload.get("status"))
+                self.store.save(service)
+                return 200, {"viewing": self._json(viewing)}
+            if method == "GET" and len(parts) == 6 and parts[3] == "leads" and parts[5] == "draft":
+                return 200, self._json(service.followup_draft(tenant_id, parts[4]))
             if len(parts) == 5 and parts[3] == "listings":
                 if method == "PATCH":
                     listing = service.update_listing(tenant_id, parts[4], **self._listing_changes(payload))
@@ -285,6 +371,8 @@ class HoshyarApi:
                 changes[name] = cls._required(payload, name)
         if "bedrooms" in payload:
             changes["bedrooms"] = cls._integer(payload, "bedrooms")
+        if "area" in payload:
+            changes["area"] = cls._optional_number(payload, "area")
         for name in ("price", "deposit", "rent"):
             if name in payload:
                 changes[name] = cls._optional_integer(payload, name)
@@ -299,6 +387,15 @@ class HoshyarApi:
             return None
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"{name} must be an integer")
+        return value
+
+    @staticmethod
+    def _optional_number(payload: dict[str, Any], name: str) -> float | None:
+        value = payload.get(name)
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{name} must be a number")
         return value
 
     @staticmethod

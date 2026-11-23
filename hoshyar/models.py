@@ -75,8 +75,45 @@ class Listing:
     price: int | None = None
     deposit: int | None = None
     rent: int | None = None
+    area: float | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    verified_at: datetime | None = None
+    verified_by: str | None = None
+    # Every amount change, oldest first; "at" plus whichever of price/deposit/rent was in force.
+    price_history: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class SavedSearch:
+    """A standing request: any فایل that fits alerts the advisors without re-asking the buyer."""
+
+    id: str
+    tenant_id: str
+    name: str
+    deal_type: DealType
+    max_price: int | None = None
+    max_deposit: int | None = None
+    max_rent: int | None = None
+    neighborhood: str | None = None
+    bedrooms: int | None = None
+    lead_id: str | None = None
+    created_at: datetime | None = None
+
+
+ViewingStatus = Literal["scheduled", "done", "cancelled"]
+
+
+@dataclass
+class Viewing:
+    id: str
+    tenant_id: str
+    lead_id: str
+    listing_id: str
+    starts_at: datetime
+    agent_id: str | None = None
+    status: ViewingStatus = "scheduled"
+    note: str | None = None
 
 
 def new_id(prefix: str) -> str:

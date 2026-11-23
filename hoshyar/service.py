@@ -4,8 +4,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from statistics import mean
 
+from . import features
 from .intent import extract_intent, merge_intent
-from .models import Agent, Lead, Listing, Message, Tenant, new_id
+from .models import Agent, Lead, Listing, Message, SavedSearch, Tenant, Viewing, new_id
 
 
 PILOT_LIMIT = 5
@@ -19,6 +20,8 @@ class HoshyarService:
         self.agents: dict[str, Agent] = {}
         self.leads: dict[str, Lead] = {}
         self.listings: dict[str, Listing] = {}
+        self.saved_searches: dict[str, SavedSearch] = {}
+        self.viewings: dict[str, Viewing] = {}
         self.baselines: dict[str, dict[str, float]] = {}
         self.referrals: dict[str, set[str]] = defaultdict(set)
         self.pilot_tenants: set[str] = set()
@@ -27,6 +30,168 @@ class HoshyarService:
         tenant = Tenant(id=new_id("tenant"), name=name)
         self.tenants[tenant.id] = tenant
         return tenant
+
+    def add_saved_search(self, tenant_id: str, name: str, deal_type: str, max_price: int | None = None,
+                         max_deposit: int | None = None, max_rent: int | None = None,
+                         neighborhood: str | None = None, bedrooms: int | None = None,
+                         lead_id: str | None = None) -> SavedSearch:
+        """A standing request; a new فایل that fits it alerts the office instead of waiting for a call."""
+        self._tenant(tenant_id)
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("name is required")
+        if deal_type not in {"sale", "rent"}:
+            raise ValueError("deal_type must be sale or rent")
+        for value in (max_price, max_deposit, max_rent):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+                raise ValueError("search amounts must be positive integers")
+        if bedrooms is not None and (isinstance(bedrooms, bool) or not isinstance(bedrooms, int) or bedrooms < 0):
+            raise ValueError("bedrooms cannot be negative")
+        if deal_type == "sale" and (max_deposit is not None or max_rent is not None):
+            raise ValueError("a sale search only takes a maximum price")
+        if deal_type == "rent" and max_price is not None:
+            raise ValueError("a rental search takes a deposit and a rent, not a price")
+        if deal_type == "sale" and max_price is None:
+            raise ValueError("a sale search needs a maximum price")
+        if deal_type == "rent" and max_deposit is None and max_rent is None:
+            raise ValueError("a rental search needs a maximum deposit or rent")
+        if lead_id is not None:
+            self._lead(tenant_id, lead_id)
+        search = SavedSearch(
+            id=new_id("search"), tenant_id=tenant_id, name=name.strip(), deal_type=deal_type,
+            max_price=max_price, max_deposit=max_deposit, max_rent=max_rent,
+            neighborhood=neighborhood.strip() if isinstance(neighborhood, str) and neighborhood.strip() else None,
+            bedrooms=bedrooms, lead_id=lead_id, created_at=datetime.now(timezone.utc),
+        )
+        self.saved_searches[search.id] = search
+        return search
+
+    def matches_for_search(self, tenant_id: str, search_id: str) -> list[dict]:
+        search = self._search(tenant_id, search_id)
+        listings = [listing for listing in self.listings.values() if listing.tenant_id == tenant_id]
+        return [{"listing": listing, "reasons": ["fits the saved search"]} for listing in features.saved_search_matches(search, listings)]
+
+    def new_listing_alerts(self, listing_id: str) -> list[dict]:
+        """Every saved search a freshly added فایل satisfies, ready for the office to call out."""
+        listing = self.listings.get(listing_id)
+        if listing is None:
+            return []
+        alerts = []
+        for search in self.saved_searches.values():
+            if search.tenant_id == listing.tenant_id and features.listing_matches(listing, {
+                "deal_type": search.deal_type, "neighborhood": search.neighborhood,
+                "bedrooms": search.bedrooms, "max_price": search.max_price,
+                "max_deposit": search.max_deposit, "max_rent": search.max_rent,
+            }):
+                lead = self.leads.get(search.lead_id) if search.lead_id else None
+                alerts.append({
+                    "search": search,
+                    "lead_id": search.lead_id,
+                    "lead_name": lead.name if lead else None,
+                    "lead_contact": lead.contact if lead else None,
+                })
+        return alerts
+
+    def schedule_viewing(self, tenant_id: str, lead_id: str, listing_id: str, starts_at: datetime,
+                         agent_id: str | None = None, note: str | None = None) -> Viewing:
+        """Book a showing against a real lead and a real file; both must belong to the office."""
+        self._lead(tenant_id, lead_id)
+        self._listing(tenant_id, listing_id)
+        if agent_id is not None:
+            self._agent(tenant_id, agent_id)
+        if not isinstance(starts_at, datetime):
+            raise ValueError("starts_at must be a date and time")
+        viewing = Viewing(
+            id=new_id("viewing"), tenant_id=tenant_id, lead_id=lead_id, listing_id=listing_id,
+            starts_at=starts_at, agent_id=agent_id, note=note,
+        )
+        self.viewings[viewing.id] = viewing
+        return viewing
+
+    def update_viewing(self, tenant_id: str, viewing_id: str, status: str) -> Viewing:
+        if status not in {"scheduled", "done", "cancelled"}:
+            raise ValueError("status must be scheduled, done or cancelled")
+        try:
+            viewing = self.viewings[viewing_id]
+        except KeyError as error:
+            raise ValueError("unknown viewing") from error
+        if viewing.tenant_id != tenant_id:
+            raise ValueError("cross-tenant access denied")
+        viewing.status = status
+        return viewing
+
+    def reminders(self, tenant_id: str, now: datetime | None = None, within_hours: int = 24) -> list[dict]:
+        self._tenant(tenant_id)
+        if within_hours <= 0:
+            raise ValueError("within_hours must be positive")
+        viewings = [viewing for viewing in self.viewings.values() if viewing.tenant_id == tenant_id]
+        return features.viewing_reminders(
+            viewings,
+            {agent.id: agent.name for agent in self.agents.values() if agent.tenant_id == tenant_id},
+            {lead.id: lead.name or lead.contact for lead in self._tenant_leads(tenant_id)},
+            now=now, within_hours=within_hours,
+        )
+
+    def followup_draft(self, tenant_id: str, lead_id: str) -> dict:
+        """A quotable Persian reply the advisor can edit; it never invents a file the office lacks."""
+        lead = self._lead(tenant_id, lead_id)
+        return {
+            "lead_id": lead.id,
+            "text": features.followup_draft(lead, max_matches=len(self.matching_listings(tenant_id, lead_id))),
+        }
+
+    def market_trend(self, tenant_id: str, neighborhood: str | None = None, months: int = 6) -> dict:
+        self._tenant(tenant_id)
+        if months < 1 or months > 36:
+            raise ValueError("months must be between 1 and 36")
+        trend = features.price_trend(self.listings.values(), tenant_id, neighborhood=neighborhood, months=months)
+        return {**trend, "neighborhood": neighborhood}
+
+    def budget(self, deal_type: str, max_price: int | None = None, max_deposit: int | None = None,
+               max_rent: int | None = None, savings: int = 0, monthly_income: int | None = None) -> dict:
+        if deal_type not in {"sale", "rent"}:
+            raise ValueError("deal_type must be sale or rent")
+        if deal_type == "sale" and max_price is None:
+            raise ValueError("a sale budget needs a maximum price")
+        if deal_type == "rent" and max_deposit is None and max_rent is None:
+            raise ValueError("a rental budget needs a deposit or a rent")
+        return features.affordability(
+            max_price=max_price, max_deposit=max_deposit, max_rent=max_rent,
+            deal_type=deal_type, savings=savings, monthly_income=monthly_income,
+        )
+
+    def quote_commission(self, deal_type: str, price: int | None = None, deposit: int | None = None,
+                         rent: int | None = None) -> dict:
+        return features.commission(deal_type, price=price, deposit=deposit, rent=rent)
+
+    def convert_rahn(self, deposit: int, rent: int, target_deposit: int | None = None,
+                     target_rent: int | None = None) -> dict:
+        return features.convert_rahn(deposit, rent, target_deposit=target_deposit, target_rent=target_rent)
+
+    def compare_listings(self, tenant_id: str, listing_ids: list[str]) -> list[dict]:
+        if not 2 <= len(listing_ids) <= 4:
+            raise ValueError("compare between 2 and 4 listings")
+        listings = [self._listing(tenant_id, listing_id) for listing_id in dict.fromkeys(listing_ids)]
+        return features.compare(listings)
+
+    def suspicious_listings(self, tenant_id: str) -> list[dict]:
+        self._tenant(tenant_id)
+        return features.suspicious_prices(self.listings.values(), tenant_id)
+
+    def source_health(self, tenant_id: str) -> dict:
+        self._tenant(tenant_id)
+        return features.source_health(self._tenant_leads(tenant_id))
+
+    def review_queue(self, tenant_id: str, days: int = 14) -> list[dict]:
+        """Verification and freshness in one list: what an advisor should confirm before the next call."""
+        self._tenant(tenant_id)
+        queue = []
+        for item in self.stale_listings(tenant_id, days=days):
+            listing = item["listing"]
+            queue.append({
+                "listing": listing, "age_days": item["age_days"],
+                "needs": ["mark as still available"] + ([] if listing.verified_at else ["verify in person"]),
+            })
+        return queue
 
     def add_agent(self, tenant_id: str, name: str, role: str = "agent", password_hash: str | None = None) -> Agent:
         self._tenant(tenant_id)
@@ -101,10 +266,13 @@ class HoshyarService:
         price: int | None = None,
         deposit: int | None = None,
         rent: int | None = None,
+        area: float | None = None,
     ) -> Listing:
         self._tenant(tenant_id)
         if bedrooms < 0:
             raise ValueError("bedrooms cannot be negative")
+        if area is not None and area <= 0:
+            raise ValueError("area must be positive")
         if deal_type not in {"sale", "rent"}:
             raise ValueError("deal_type must be sale or rent")
         amounts = {"price": price, "deposit": deposit, "rent": rent}
@@ -122,7 +290,8 @@ class HoshyarService:
         listing = Listing(
             id=new_id("listing"), tenant_id=tenant_id, title=title, neighborhood=neighborhood,
             deal_type=deal_type, bedrooms=bedrooms, price=price, deposit=deposit, rent=rent,
-            created_at=now, updated_at=now,
+            area=area, created_at=now, updated_at=now,
+            price_history=[self._moment_entry(now, price=price, deposit=deposit, rent=rent)],
         )
         self.listings[listing.id] = listing
         return listing
@@ -138,11 +307,16 @@ class HoshyarService:
             "price": changes.get("price", listing.price),
             "deposit": changes.get("deposit", listing.deposit),
             "rent": changes.get("rent", listing.rent),
+            "area": changes.get("area", listing.area),
         }
         if not isinstance(merged["title"], str) or not merged["title"].strip():
             raise ValueError("title is required")
         if not isinstance(merged["neighborhood"], str) or not merged["neighborhood"].strip():
             raise ValueError("neighborhood is required")
+        if merged["area"] is not None and (
+            isinstance(merged["area"], bool) or not isinstance(merged["area"], (int, float)) or merged["area"] <= 0
+        ):
+            raise ValueError("area must be positive")
         if isinstance(merged["bedrooms"], bool) or not isinstance(merged["bedrooms"], int) or merged["bedrooms"] < 0:
             raise ValueError("bedrooms cannot be negative")
         if merged["deal_type"] not in {"sale", "rent"}:
@@ -162,6 +336,32 @@ class HoshyarService:
         for name, value in merged.items():
             setattr(listing, name, value.strip() if isinstance(value, str) else value)
         listing.updated_at = datetime.now(timezone.utc)
+        # Only a change in an amount is history; renaming a title would flood the trend chart.
+        if any(changes.get(name) is not None for name in ("price", "deposit", "rent")):
+            listing.price_history.append(self._moment_entry(
+                listing.updated_at, price=listing.price, deposit=listing.deposit, rent=listing.rent,
+            ))
+        return listing
+
+    @staticmethod
+    def _moment_entry(moment: datetime, **amounts: int | None) -> dict:
+        entry = {"at": moment}
+        entry.update({name: value for name, value in amounts.items() if value is not None})
+        return entry
+
+    def touch_listing(self, tenant_id: str, listing_id: str) -> Listing:
+        """Confirm the file is still on the market without pretending its price changed."""
+        listing = self._listing(tenant_id, listing_id)
+        listing.updated_at = datetime.now(timezone.utc)
+        return listing
+
+    def verify_listing(self, tenant_id: str, listing_id: str, agent_id: str) -> Listing:
+        """An in-person visit stamp, the answer Divar gives to bait listings."""
+        listing = self._listing(tenant_id, listing_id)
+        self._agent(tenant_id, agent_id)
+        listing.verified_at = datetime.now(timezone.utc)
+        listing.verified_by = agent_id
+        listing.updated_at = listing.verified_at
         return listing
 
     def delete_listing(self, tenant_id: str, listing_id: str) -> None:
@@ -193,11 +393,18 @@ class HoshyarService:
         leads = self._tenant_leads(tenant_id)
         at_risk = [lead for lead in leads if self._is_overdue(lead, now, overdue_hours)]
         cold = [lead for lead in leads if self._is_cold(lead, now, cold_after_days)]
+        listings = [listing for listing in self.listings.values() if listing.tenant_id == tenant_id]
+        stale = self.stale_listings(tenant_id, days=cold_after_days, now=now)
         return {
             "active_lead_count": sum(lead.state not in {"cold", "converted"} for lead in leads),
             "at_risk_leads": [self._lead_summary(lead) for lead in at_risk],
             "unassigned_leads": [self._lead_summary(lead) for lead in leads if lead.assigned_agent_id is None],
             "cold_leads": [self._lead_summary(lead) for lead in cold],
+            "listing_count": len(listings),
+            "stale_listing_count": len(stale),
+            "unverified_listing_count": sum(listing.verified_at is None for listing in listings),
+            "upcoming_viewings": len(self.reminders(tenant_id, now=now)),
+            "saved_search_count": sum(search.tenant_id == tenant_id for search in self.saved_searches.values()),
         }
 
     def mark_cold(self, tenant_id: str, lead_id: str) -> Lead:
@@ -425,6 +632,15 @@ class HoshyarService:
         if lead.tenant_id != tenant_id:
             raise ValueError("cross-tenant access denied")
         return lead
+
+    def _search(self, tenant_id: str, search_id: str) -> SavedSearch:
+        try:
+            search = self.saved_searches[search_id]
+        except KeyError as error:
+            raise ValueError("unknown saved search") from error
+        if search.tenant_id != tenant_id:
+            raise ValueError("cross-tenant access denied")
+        return search
 
     def _lead_by_contact(self, tenant_id: str, contact: str) -> Lead | None:
         return next((lead for lead in self._tenant_leads(tenant_id) if lead.contact == contact), None)
