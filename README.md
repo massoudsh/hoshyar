@@ -84,6 +84,20 @@ Application code lives in this repository:
 
 The prototype includes member sessions and role-aware views, lead assignment and follow-up queues, listing management, and explained lead–listing matches. Channel adapters normalize Telegram, WhatsApp, Divar, and Sheypoor payloads behind authenticated webhook endpoints; configuring providers and production deployment remains separate work.
 
+The 2026 feature set adds ten tools benchmarked against Divar, Kilid, Zillow and Redfin ([`outputs/hoshyar-rivals-2026.md`](outputs/hoshyar-rivals-2026.md)):
+
+1. **Rahn/rent converter** — turns a deposit + rent mix into a single figure and back, one sixth per 1ت free rent.
+2. **Commission quote** — sale and rental office fees, split per side, in one call.
+3. **Affordability engine** — cash, income and a bank profit rate become a monthly payment; for rentals it shows the gap and the rent the cash actually affords.
+4. **Saved searches with instant alerts** — a standing buyer request; every new file that fits raises an alert with the buyer's name.
+5. **Viewing scheduling and 24-hour reminders** — a booking is tied to a real lead and a real file, and appears on the follow-up desk.
+6. **Response drafting** — a Persian reply built only from the extracted intent and real matches, editable before it is recorded.
+7. **Neighbourhood price trend** — monthly average sale price reconstructed from each file's price history.
+8. **Suspicious-price detection** — files far under their peers, or with a sale price below their own deposit.
+9. **Freshness, in-person verification and a review queue** — "still available" refreshes the date; a verified stamp has an owner.
+10. **Listing comparison and channel health** — 2–4 files side by side with price per meter, plus unanswered and conversion rates per source channel.
+
+
 ### Run locally
 
 Requires Python 3.10 or newer; no third-party Python packages or frontend build step are required. Set `HOSHYAR_BOOTSTRAP_KEY` to a private value in your environment before starting the server. It authorizes office creation and must not be committed or exposed in frontend code.
