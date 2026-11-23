@@ -50,6 +50,7 @@
         <p id="viewer-badge" class="viewer-badge"></p>
         <section id="followups-view" class="workspace-view">
           <section class="panel"><h2>صف پیگیری</h2><p>هر مشتری که آخرین پیامش از طرف اوست، اینجا با اولویت دیرکرد و تعداد فایل قابل‌پیشنهاد مرتب می‌شود.</p><div id="followup-list"></div></section>
+          <section class="panel"><h2>یادآوری بازدیدهای ۲۴ ساعت آینده</h2><p>بازدیدهای برنامه‌ریزی‌شده که تا فردا شروع می‌شوند، با مشاور و مشتری.</p><div id="reminder-list"></div></section>
         </section>
         <section id="overview-view" class="workspace-view" hidden>
           <div class="stat-grid" id="stats"></div>
@@ -63,6 +64,31 @@
               <label>متن پیام<textarea name="body" required maxlength="10000"></textarea></label>
               <button class="primary-button" type="submit">ثبت در دفتر</button>
             </form>
+          </section>
+          <section class="panel"><h2>ماشین‌حساب بودجه و کمیسیون</h2><p>مثل ابزار خریدار زیلو: با پول نقد و درآمد ماهانه ببینید چه سقفی واقع‌بینانه است؛ کمیسیون قابل‌گفتن با مشتری را هم همین‌جا حساب کنید.</p>
+            <form id="budget-form" class="workspace-form">
+              <label>نوع معامله<select name="deal_type"><option value="sale">فروش</option><option value="rent">رهن و اجاره</option></select></label>
+              <label data-budget="sale">سقف قیمت (تومان)<input name="max_price" inputmode="numeric" dir="ltr"></label>
+              <label data-budget="rent" hidden>سقف رهن (تومان)<input name="max_deposit" inputmode="numeric" dir="ltr"></label>
+              <label data-budget="rent" hidden>سقف اجارهٔ ماهانه (تومان)<input name="max_rent" inputmode="numeric" dir="ltr"></label>
+              <label>پول نقد موجود (تومان)<input name="savings" inputmode="numeric" dir="ltr"></label>
+              <label>درآمد ماهانه (تومان)<input name="monthly_income" inputmode="numeric" dir="ltr"></label>
+              <button class="primary-button" type="submit">محاسبهٔ توان خرید</button>
+            </form>
+            <div id="budget-result"></div>
+            <form id="commission-form" class="workspace-form">
+              <label>کمیسیون برای<select name="deal_type"><option value="sale">فروش</option><option value="rent">رهن و اجاره</option></select></label>
+              <label data-commission="sale">قیمت کل (تومان)<input name="price" inputmode="numeric" dir="ltr"></label>
+              <label data-commission="rent" hidden>هرماه اجاره (تومان)<input name="rent" inputmode="numeric" dir="ltr"></label>
+              <button class="outline-button" type="submit">محاسبهٔ کمیسیون</button>
+            </form>
+            <div id="commission-result"></div>
+            <form id="convert-form" class="workspace-form">
+              <label>رهن فعلی (تومان)<input name="deposit" inputmode="numeric" dir="ltr" required></label>
+              <label>اجارهٔ فعلی (تومان)<input name="rent" inputmode="numeric" dir="ltr" required></label>
+              <button class="outline-button" type="submit">تبدیل رهن و اجاره</button>
+            </form>
+            <div id="convert-result"></div>
           </section>
         </section>
         <section id="inbox-view" class="workspace-view" hidden>
@@ -79,11 +105,40 @@
               <label data-deal="sale">قیمت کل (تومان)<input name="price" inputmode="numeric" dir="ltr"></label>
               <label data-deal="rent" hidden>رهن (تومان)<input name="deposit" inputmode="numeric" dir="ltr"></label>
               <label data-deal="rent" hidden>اجاره ماهانه (تومان)<input name="rent" inputmode="numeric" dir="ltr"></label>
+              <label>متراژ (متر مربع)<input name="area" inputmode="decimal" dir="ltr"></label>
               <button class="primary-button" type="submit">ثبت فایل</button>
             </form>
             <datalist id="neighborhoods"></datalist>
           </section>
-          <section class="panel"><h2>فایل‌های ثبت‌شده</h2><p>تطبیق بر اساس نیاز ثبت‌شدهٔ مشتری انجام می‌شود؛ بودجهٔ مشخص فیلتر سخت است.</p><div id="listing-list"></div></section>
+          <section class="panel"><h2>فایل‌های ثبت‌شده</h2><p>تطبیق بر اساس نیاز ثبت‌شدهٔ مشتری انجام می‌شود؛ بودجهٔ مشخص فیلتر سخت است.</p><div id="listing-list"></div>
+            <form id="compare-form" class="workspace-form">
+              <label>مقایسهٔ کنار‌به‌کنار<select name="ids" multiple size="4" required></select></label>
+              <button class="outline-button" type="submit">مقایسه (۲ تا ۴ فایل)</button>
+            </form>
+            <div id="compare-result"></div>
+          </section>
+          <section class="panel"><h2>صف بازبینی فایل</h2><p>فایل قدیمی یا تأییدنشده؛ «هنوز موجود است» تاریخ تازگی را به‌روز می‌کند و «تأیید حضوری» مهر بازدید می‌زند. مهر تأیید در کنار فایل نمایش داده می‌شود.</p><div id="review-queue"></div></section>
+          <section class="panel"><h2>روند قیمت محله</h2><p>میانگین قیمت فروش فایل‌های همین دفتر در هر ماه، از تاریخ تغییر قیمت هر فایل.</p>
+            <form id="trend-form" class="workspace-form">
+              <label>محله<input name="neighborhood" list="neighborhoods" placeholder="همهٔ محله‌ها"></label>
+              <button class="outline-button" type="submit">نمایش روند</button>
+            </form>
+            <div id="trend-result"></div>
+          </section>
+          <section class="panel"><h2>قیمت‌های مشکوک</h2><p>فایلی که قیمتش از هم‌محله‌ای‌ها بسیار پایین‌تر است یا قیمت فروشش از رهنش کمتر است، احتمالاً اشتباه تایپی یا آگهی طعمه است.</p><div id="suspicious-list"></div></section>
+          <section class="panel"><h2>جست‌وجوی ذخیره‌شده</h2><p>درخواست دائمی مشتری؛ با ثبت فایل جدید که با آن جور باشد، همین لحظه هشدار داده می‌شود.</p>
+            <form id="search-form" class="workspace-form">
+              <label>نام درخواست<input name="name" required maxlength="120"></label>
+              <label>نوع معامله<select name="deal_type"><option value="sale">فروش</option><option value="rent">رهن و اجاره</option></select></label>
+              <label data-search="sale">سقف قیمت (تومان)<input name="max_price" inputmode="numeric" dir="ltr"></label>
+              <label data-search="rent" hidden>سقف رهن (تومان)<input name="max_deposit" inputmode="numeric" dir="ltr"></label>
+              <label data-search="rent" hidden>سقف اجاره (تومان)<input name="max_rent" inputmode="numeric" dir="ltr"></label>
+              <label>محله<input name="neighborhood" list="neighborhoods" maxlength="60"></label>
+              <label>مشتری (اختیاری)<select name="lead_id"></select></label>
+              <button class="primary-button" type="submit">ذخیرهٔ جست‌وجو</button>
+            </form>
+            <div id="saved-search-list"></div>
+          </section>
           <section class="panel"><h2>فایل‌های قدیمی</h2><p>فایلی که بیش از ۱۴ روز به‌روزرسانی نشده، احتمالاً فروخته یا اجاره شده است. با ویرایش، تاریخ تازگی به‌روز می‌شود.</p><div id="stale-list"></div></section>
           <section class="panel" id="channel-panel"><h2>اتصال کانال‌ها</h2><p>برای هر کانال یک کلید بسازید و آن را در تنظیمات webhook همان کانال بگذارید. پیام‌های تکراری دوباره ثبت نمی‌شوند.</p>
             <form id="channel-form" class="workspace-form">
@@ -105,7 +160,10 @@
             <div id="agent-form-wrap"><form id="agent-form" class="workspace-form"><label>نام عضو جدید<input name="name" required maxlength="120"></label><label>نقش<select name="role"><option value="agent">مشاور</option><option value="manager">مدیر</option></select></label><label>رمز (حداقل ۸ نویسه)<input name="password" type="password" minlength="8" autocomplete="new-password"></label><button type="submit" class="primary-button">افزودن عضو</button></form></div>
           </section>
         </section>
-        <section id="reports-view" class="workspace-view" hidden><section class="panel"><h2>اندازه‌گیری پایلوت</h2><p>محاسبه بر اساس پیام‌ها و وضعیت‌های ثبت‌شده؛ نبود داده با صفرِ ساختگی جایگزین نمی‌شود.</p><div id="report"></div></section></section>
+        <section id="reports-view" class="workspace-view" hidden>
+          <section class="panel"><h2>اندازه‌گیری پایلوت</h2><p>محاسبه بر اساس پیام‌ها و وضعیت‌های ثبت‌شده؛ نبود داده با صفرِ ساختگی جایگزین نمی‌شود.</p><div id="report"></div></section>
+          <section class="panel"><h2>سلامت کانال‌ها</h2><p>هر کانال چه تعداد مشتری آورده و چند نفرشان بی‌پاسخ مانده‌اند؛ تصمیم می‌گیرید کدام کانال را جدی‌تر بگیرید.</p><div id="source-health"></div></section>
+        </section>
       </div>
     </section>
   </main>

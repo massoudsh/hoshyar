@@ -104,15 +104,36 @@ function empty(message) {
 
 function render() {
   renderFollowups();
+  renderReminders();
   renderStats();
   renderRisks();
   renderCold();
   renderLeads();
   renderListings();
-  renderStale();
+  renderQueue();
+  renderCompareOptions();
+  renderSavedSearches();
+  renderTrend();
+  renderSuspicious();
   renderAgents();
   renderPerformance();
   renderReport();
+  renderSourceHealth();
+}
+
+function renderReminders() {
+  const container = $('#reminder-list');
+  container.replaceChildren();
+  const reminders = state.data.reminders || [];
+  if (!reminders.length) return container.append(empty('بازدیدی برای ۲۴ ساعت آینده برنامه‌ریزی نشده است.'));
+  for (const reminder of reminders) {
+    const row = element('div', 'lead-row');
+    row.append(element('strong', '', reminder.lead_name || 'مشتری'));
+    row.append(element('span', 'tag', new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(reminder.starts_at))));
+    row.append(element('span', 'tag', reminder.agent_name ? `مشاور: ${reminder.agent_name}` : 'بدون مشاور'));
+    row.append(element('span', 'tag', state.data.listings.find((item) => item.id === reminder.listing_id)?.title || 'فایل'));
+    container.append(row);
+  }
 }
 
 function renderStats() {
@@ -125,6 +146,8 @@ function renderStats() {
     ['بدون مشاور', number(dashboard.unassigned_leads.length)],
     ['میانگین زمان پاسخ', measurement.current.response_hours === null ? 'داده‌ای نیست' : number(measurement.current.response_hours, ' ساعت')],
     ['نرخ تبدیل', leads.length ? percent(measurement.current.conversion_rate) : 'داده‌ای نیست'],
+    ['فایل تازه‌نشده', number(dashboard.stale_listing_count)],
+    ['بازدید پیش‌رو', number(dashboard.upcoming_viewings)],
   ];
   for (const [label, value] of cards) {
     const card = element('article', 'stat-card');
@@ -285,6 +308,87 @@ function renderDetail(lead) {
   matches.append(matchList);
   detail.append(matches);
   loadMatches(lead, matchList);
+
+  const draftBox = element('section', 'draft-box');
+  draftBox.append(element('h3', '', 'پیش‌نویس پاسخ'));
+  const hint = element('p', 'empty', 'پیش‌نویس از همان چیزی ساخته می‌شود که مشتری گفته است؛ قبل از ارسال ویرایشش کنید.');
+  const draftButton = element('button', 'outline-button', 'ساخت پیش‌نویس پاسخ');
+  draftButton.type = 'button';
+  draftBox.append(hint, draftButton);
+  const textarea = element('textarea');
+  textarea.rows = 4;
+  textarea.hidden = true;
+  const sendButton = element('button', 'primary-button', 'ثبت پاسخ در دفتر');
+  sendButton.type = 'button';
+  sendButton.hidden = true;
+  draftButton.addEventListener('click', async () => {
+    draftButton.disabled = true;
+    try {
+      const draft = await api('GET', `/v1/tenants/${encodeURIComponent(state.tenant)}/leads/${encodeURIComponent(lead.id)}/draft`);
+      textarea.value = draft.text;
+      textarea.hidden = false;
+      sendButton.hidden = false;
+      setStatus('پیش‌نویس آماده است؛ پیش از ثبت ویرایشش کنید.');
+    } catch (error) {
+      setStatus(`پیش‌نویس ساخته نشد: ${error.message}`, true);
+    } finally {
+      draftButton.disabled = false;
+    }
+  });
+  sendButton.addEventListener('click', async () => {
+    const body = textarea.value.trim();
+    if (!body) return setStatus('متن پاسخ خالی است.', true);
+    sendButton.disabled = true;
+    try {
+      const viewer = state.data.viewer;
+      await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/messages`, {
+        contact: lead.contact, body, channel: 'manual', direction: 'outbound',
+        ...(viewer ? { agent_id: viewer.id } : {}),
+      });
+      await loadWorkspace();
+      setStatus('پاسخ در دفتر ثبت شد و مشتری از صف پیگیری خارج شد.');
+    } catch (error) {
+      setStatus(`پاسخ ثبت نشد: ${error.message}`, true);
+    } finally {
+      sendButton.disabled = false;
+    }
+  });
+  draftBox.append(textarea, sendButton);
+  detail.append(draftBox);
+
+  const visitForm = element('form', 'workspace-form');
+  const visitSelect = element('select');
+  visitSelect.name = 'listing_id';
+  visitSelect.append(new Option('فایل مورد بازدید', ''));
+  for (const listing of state.data.listings) visitSelect.append(new Option(`${listing.title} — ${listing.neighborhood}`, listing.id));
+  const visitTime = element('input');
+  visitTime.type = 'datetime-local';
+  visitTime.name = 'starts_at';
+  visitTime.required = true;
+  const visitLabel = element('label', '', 'برنامهٔ بازدید');
+  visitLabel.append(visitSelect);
+  const timeLabel = element('label', '', 'زمان');
+  timeLabel.append(visitTime);
+  const visitSubmit = element('button', 'outline-button', 'ثبت بازدید');
+  visitSubmit.type = 'submit';
+  visitForm.append(visitLabel, timeLabel, visitSubmit);
+  visitForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!visitSelect.value || !visitTime.value) return setStatus('فایل و زمان بازدید لازم است.', true);
+    visitSubmit.disabled = true;
+    try {
+      await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/viewings`, {
+        lead_id: lead.id, listing_id: visitSelect.value, starts_at: new Date(visitTime.value).toISOString(),
+      });
+      await loadWorkspace();
+      setStatus('بازدید ثبت شد و در یادآوری‌های ۲۴ ساعت آینده دیده می‌شود.');
+    } catch (error) {
+      setStatus(`بازدید ثبت نشد: ${error.message}`, true);
+    } finally {
+      visitSubmit.disabled = false;
+    }
+  });
+  detail.append(visitForm);
 }
 
 const REASONS = {
@@ -337,6 +441,9 @@ function listingRow(listing) {
   row.append(element('span', 'tag', listing.deal_type === 'rent' ? 'رهن و اجاره' : 'فروش'));
   row.append(element('span', 'tag', listingLabel(listing)));
   row.append(element('span', 'tag', listing.bedrooms ? `${number(listing.bedrooms)} خواب` : 'بدون خواب'));
+  if (listing.area) row.append(element('span', 'tag', `${number(listing.area)} متر`));
+  if (listing.verified_at) row.append(element('span', 'tag verified', 'تأیید حضوری'));
+  else row.append(element('span', 'tag unverified', 'تأییدنشده'));
   if (listing.updated_at) {
     row.append(element('span', 'tag', `آخرین به‌روزرسانی: ${new Intl.DateTimeFormat('fa-IR', { dateStyle: 'medium' }).format(new Date(listing.updated_at))}`));
   }
@@ -360,6 +467,7 @@ function openListingEditor(listing) {
   form.elements.price.value = listing.price ?? '';
   form.elements.deposit.value = listing.deposit ?? '';
   form.elements.rent.value = listing.rent ?? '';
+  form.elements.area.value = listing.area ?? '';
   form.dataset.editing = listing.id;
   form.querySelector('button[type=submit]').textContent = 'ذخیره تغییرات';
   form.scrollIntoView({ block: 'start' });
@@ -406,6 +514,154 @@ async function renderStale() {
 function renderNeighborhoods() {
   const names = new Set(state.data.listings.map((listing) => listing.neighborhood));
   $('#neighborhoods').replaceChildren(...[...names].map((name) => new Option(name, name)));
+  const select = $('#search-form').elements.lead_id;
+  select.replaceChildren(new Option('بدون مشتری', ''));
+  for (const lead of state.data.leads) select.append(new Option(lead.name || lead.contact, lead.id));
+}
+
+async function renderQueue() {
+  const container = $('#review-queue');
+  container.replaceChildren();
+  try {
+    const { queue } = await api('GET', `/v1/tenants/${encodeURIComponent(state.tenant)}/review-queue`);
+    if (!queue.length) return container.append(empty('همهٔ فایل‌ها تازه و تأییدشده‌اند.'));
+    for (const item of queue) {
+      const row = listingRow(item.listing);
+      row.prepend(element('span', 'tag overdue', `${number(item.age_days)} روز`));
+      row.append(element('span', 'tag', item.needs.join(' · ')));
+      const touch = element('button', 'outline-button', 'هنوز موجود است');
+      touch.type = 'button';
+      touch.addEventListener('click', () => listingAction(item.listing, 'touch', touch, 'تاریخ تازگی به‌روز شد.'));
+      const verify = element('button', 'outline-button', 'تأیید حضوری');
+      verify.type = 'button';
+      verify.addEventListener('click', () => listingAction(item.listing, 'verify', verify, 'مهر تأیید حضوری ثبت شد.'));
+      row.append(touch, verify);
+      container.append(row);
+    }
+  } catch (error) {
+    container.append(empty(`صف بازبینی خوانده نشد: ${error.message}`));
+  }
+}
+
+async function listingAction(listing, action, button, message) {
+  button.disabled = true;
+  try {
+    const viewer = state.data.viewer;
+    await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/listings/${encodeURIComponent(listing.id)}/${action}`,
+      action === 'verify' && !viewer ? { agent_id: state.data.agents[0]?.id } : undefined);
+    await loadWorkspace();
+    setStatus(message);
+  } catch (error) {
+    setStatus(`انجام نشد: ${error.message}`, true);
+    button.disabled = false;
+  }
+}
+
+function renderCompareOptions() {
+  const select = $('#compare-form').elements.ids;
+  select.replaceChildren(...state.data.listings.map((listing) =>
+    new Option(`${listing.title} — ${listing.neighborhood} — ${listingLabel(listing)}`, listing.id)));
+}
+
+function renderSavedSearches() {
+  const container = $('#saved-search-list');
+  container.replaceChildren();
+  const searches = state.data.saved_searches || [];
+  if (!searches.length) return container.append(empty('جست‌وجوی ذخیره‌شده‌ای نیست.'));
+  for (const search of searches) {
+    const row = element('div', 'lead-row');
+    row.append(element('strong', '', search.name));
+    row.append(element('span', 'tag', search.deal_type === 'rent' ? 'رهن و اجاره' : 'فروش'));
+    if (search.max_price) row.append(element('span', 'tag', `تا ${amount(search.max_price)}`));
+    if (search.max_deposit) row.append(element('span', 'tag', `رهن تا ${amount(search.max_deposit)}`));
+    if (search.max_rent) row.append(element('span', 'tag', `اجاره تا ${amount(search.max_rent)}`));
+    if (search.neighborhood) row.append(element('span', 'tag', search.neighborhood));
+    const button = element('button', 'outline-button', 'فایل‌های جور');
+    button.type = 'button';
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const { matches } = await api('GET', `/v1/tenants/${encodeURIComponent(state.tenant)}/saved-searches/${encodeURIComponent(search.id)}/matches`);
+        setStatus(matches.length ? `${number(matches.length)} فایل با این جست‌وجو جور است: ${matches.map((match) => match.listing.title).join('، ')}`
+          : 'هیچ فایلی الان با این جست‌وجو جور نیست.');
+      } catch (error) {
+        setStatus(`جست‌وجو انجام نشد: ${error.message}`, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    row.append(button);
+    container.append(row);
+  }
+}
+
+async function loadTrend(neighborhood) {
+  const container = $('#trend-result');
+  container.replaceChildren(empty('در حال خواندن روند…'));
+  try {
+    const query = new URLSearchParams({ months: '6' });
+    if (neighborhood) query.set('neighborhood', neighborhood);
+    const trend = await api('GET', `/v1/tenants/${encodeURIComponent(state.tenant)}/market-trend?${query}`);
+    container.replaceChildren();
+    if (!trend.points.length) return container.append(empty('برای این محله قیمتی از فایل‌های فروش ثبت نشده است.'));
+    for (const point of trend.points) {
+      const row = element('div', 'lead-row');
+      row.append(element('strong', '', point.month));
+      row.append(element('span', 'tag', `میانگین ${amount(point.average)}`));
+      row.append(element('span', 'tag', `${number(point.count)} فایل`));
+      container.append(row);
+    }
+    container.append(element('p', '', trend.change_percent === null
+      ? 'برای محاسبهٔ تغییر، دست‌کم دو ماه داده لازم است.'
+      : `تغییر نسبت به ابتدای بازه: ${number(trend.change_percent)}٪`));
+  } catch (error) {
+    container.replaceChildren(empty(`روند خوانده نشد: ${error.message}`));
+  }
+}
+
+function renderTrend() {
+  if (!$('#trend-result').childElementCount) {
+    $('#trend-result').append(element('p', 'empty', 'برای دیدن روند قیمت، دکمهٔ «نمایش روند» را بزنید.'));
+  }
+}
+
+async function renderSuspicious() {
+  const container = $('#suspicious-list');
+  container.replaceChildren();
+  try {
+    const { suspicious } = await api('GET', `/v1/tenants/${encodeURIComponent(state.tenant)}/suspicious-listings`);
+    if (!suspicious.length) return container.append(empty('قیمت مشکوکی پیدا نشد.'));
+    for (const finding of suspicious) {
+      const row = element('div', 'lead-row');
+      row.append(element('strong', '', finding.listing.title));
+      row.append(element('span', 'tag overdue', finding.reason === 'sale price below its own deposit'
+        ? 'قیمت فروش از رهن کمتر است' : `حدود ${number(finding.discount_percent)}٪ زیر هم‌محله‌ای‌ها`));
+      row.append(element('span', 'tag', listingLabel(finding.listing)));
+      if (finding.market_average) row.append(element('span', 'tag', `میانگین محله: ${amount(finding.market_average)}`));
+      container.append(row);
+    }
+  } catch (error) {
+    container.append(empty(`بررسی قیمت انجام نشد: ${error.message}`));
+  }
+}
+
+async function renderSourceHealth() {
+  const container = $('#source-health');
+  container.replaceChildren();
+  try {
+    const { channels } = await api('GET', `/v1/tenants/${encodeURIComponent(state.tenant)}/source-health`);
+    if (!channels.length) return container.append(empty('هنوز پیامی از کانال‌ها نرسیده است.'));
+    for (const row of channels) {
+      const line = element('div', 'lead-row');
+      line.append(element('strong', '', row.channel));
+      line.append(element('span', 'tag', `${number(row.leads)} مشتری`));
+      line.append(element('span', 'tag', `${percent(row.unanswered_rate)} بی‌پاسخ`));
+      line.append(element('span', 'tag', `تبدیل ${percent(row.conversion_rate)}`));
+      container.append(line);
+    }
+  } catch (error) {
+    container.append(empty(`سلامت کانال‌ها خوانده نشد: ${error.message}`));
+  }
 }
 
 function showDealFields(dealType) {
@@ -592,6 +848,7 @@ $('#listing-form').addEventListener('submit', async (event) => {
       price: dealType === 'sale' ? parseAmount(String(data.get('price') || '')) : null,
       deposit: dealType === 'rent' ? parseAmount(String(data.get('deposit') || '')) : null,
       rent: dealType === 'rent' ? parseAmount(String(data.get('rent') || '')) : null,
+      area: data.get('area') ? Number(String(data.get('area')).replace(/[^\d.]/g, '')) : null,
     };
     if (dealType === 'sale' && !payload.price) throw new Error('برای فایل فروش، قیمت کل لازم است');
     if (dealType === 'rent' && !payload.deposit && !payload.rent) throw new Error('رهن یا اجارهٔ ماهانه را وارد کنید');
@@ -604,7 +861,13 @@ $('#listing-form').addEventListener('submit', async (event) => {
     if (editing) {
       await api('PATCH', `/v1/tenants/${encodeURIComponent(state.tenant)}/listings/${encodeURIComponent(editing)}`, payload);
     } else {
-      await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/listings`, payload);
+      const { alerts } = await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/listings`, payload);
+      if (alerts && alerts.length) {
+        setStatus(`فایل ثبت شد و با ${number(alerts.length)} جست‌وجوی ذخیره‌شده جور است: ${alerts.map((alert) => alert.lead_name || alert.lead_contact || alert.search.name).join('، ')}`);
+        await loadWorkspace();
+        resetListingForm(form);
+        return;
+      }
     }
     await loadWorkspace();
     resetListingForm(form);
@@ -676,6 +939,144 @@ $('#disconnect').addEventListener('click', async () => {
   $('#disconnect').hidden = true;
   $('#office-name').textContent = 'دفتر متصل نشده';
   setStatus('اتصال قطع شد.');
+});
+
+function toggleFieldGroup(formSelector, attribute, value) {
+  document.querySelectorAll(`${formSelector} [${attribute}]`).forEach((label) => {
+    label.hidden = label.getAttribute(attribute) !== value;
+  });
+}
+
+for (const selector of ['#budget-form', '#commission-form', '#search-form']) {
+  const attribute = selector === '#budget-form' ? 'data-budget' : selector === '#commission-form' ? 'data-commission' : 'data-search';
+  $(selector).elements.deal_type.addEventListener('change', (event) => toggleFieldGroup(selector, attribute, event.currentTarget.value));
+}
+
+$('#budget-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = fields(form);
+  const result = $('#budget-result');
+  try {
+    const payload = {
+      deal_type: data.deal_type,
+      savings: parseAmount(String(data.savings || '')) || 0,
+      monthly_income: parseAmount(String(data.monthly_income || '')),
+    };
+    if (data.deal_type === 'sale') payload.max_price = parseAmount(String(data.max_price || ''));
+    else {
+      payload.max_deposit = parseAmount(String(data.max_deposit || ''));
+      payload.max_rent = parseAmount(String(data.max_rent || ''));
+    }
+    const answer = await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/budget`, payload);
+    result.replaceChildren();
+    if (answer.deal_type === 'sale') {
+      result.append(element('p', '', `سقف بودجه: ${amount(answer.budget)} · آوردهٔ نقدی: ${amount(answer.savings)}`));
+      result.append(element('p', '', answer.financed
+        ? `بخش تأمین‌مالی‌شده: ${amount(answer.financed)} · قسط ماهانه با سود ${number(answer.annual_profit_rate * 100)}٪: ${amount(answer.monthly_payment)}`
+        : 'با پول نقد فعلی، فایل بدون وام در دسترس است.'));
+      if (answer.monthly_payment_share_of_income !== null) {
+        result.append(element('p', '', `سهم قسط از درآمد ماهانه: ${percent(answer.monthly_payment_share_of_income)}`));
+      }
+    } else {
+      result.append(element('p', '', `سقف رهن: ${amount(answer.max_deposit)} · سقف اجاره: ${amount(answer.max_rent)} · معادل رهنی: ${amount(answer.rahn_equivalent)}`));
+      if (answer.deposit_gap) {
+        result.append(element('p', '', `برای پرداخت رهن کامل ${amount(answer.deposit_gap)} کم دارید؛ با پول نقد فعلی، اجارهٔ حدود ${amount(answer.rent_with_savings)} در دسترس است.`));
+      }
+    }
+    setStatus('محاسبه انجام شد.');
+  } catch (error) {
+    result.replaceChildren(empty(`محاسبه انجام نشد: ${error.message}`));
+  }
+});
+
+$('#commission-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = fields(form);
+  const result = $('#commission-result');
+  try {
+    const payload = { deal_type: data.deal_type };
+    if (data.deal_type === 'sale') payload.price = parseAmount(String(data.price || ''));
+    else payload.rent = parseAmount(String(data.rent || ''));
+    const answer = await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/commission`, payload);
+    result.replaceChildren(element('p', '', `کمیسیون کل: ${amount(answer.total)} · سهم هر طرف: ${amount(answer.per_side)}`));
+  } catch (error) {
+    result.replaceChildren(empty(`محاسبه انجام نشد: ${error.message}`));
+  }
+});
+
+$('#convert-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = fields(form);
+  const result = $('#convert-result');
+  try {
+    const answer = await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/convert-rahn`, {
+      deposit: parseAmount(String(data.deposit)) || 0,
+      rent: parseAmount(String(data.rent)) || 0,
+    });
+    result.replaceChildren(
+      element('p', '', `معادل کل: ${amount(answer.rahn_equivalent)}`),
+      element('p', '', `اگر همهٔ پول رهن شود: اجارهٔ صفر · اگر رهن صفر شود: اجارهٔ ${amount(answer.rent_if_deposit_is_zero)}`),
+    );
+  } catch (error) {
+    result.replaceChildren(empty(`تبدیل انجام نشد: ${error.message}`));
+  }
+});
+
+$('#compare-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const selected = new FormData(event.currentTarget).getAll('ids');
+  const result = $('#compare-result');
+  try {
+    const { listings } = await api('GET', `/v1/tenants/${encodeURIComponent(state.tenant)}/compare?ids=${encodeURIComponent(selected.join(','))}`);
+    result.replaceChildren();
+    for (const listing of listings) {
+      const row = element('div', 'lead-row');
+      row.append(element('strong', '', listing.title));
+      row.append(element('span', 'tag', listing.neighborhood));
+      row.append(element('span', 'tag', listingLabel(listing)));
+      row.append(element('span', 'tag', `${number(listing.bedrooms)} خواب`));
+      if (listing.area) row.append(element('span', 'tag', `${number(listing.area)} متر`));
+      if (listing.price_per_meter) row.append(element('span', 'tag', `متری ${amount(listing.price_per_meter)}`));
+      if (listing.rent_per_meter) row.append(element('span', 'tag', `اجاره‌متری ${amount(listing.rent_per_meter)}`));
+      row.append(element('span', 'tag', `${number(listing.freshness)} روز از آخرین به‌روزرسانی`));
+      row.append(element('span', 'tag', listing.verified ? 'تأیید حضوری' : 'تأییدنشده'));
+      result.append(row);
+    }
+  } catch (error) {
+    result.replaceChildren(empty(`مقایسه انجام نشد: ${error.message}`));
+  }
+});
+
+$('#trend-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  loadTrend(String(new FormData(event.currentTarget).get('neighborhood') || '').trim());
+});
+
+$('#search-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = fields(form);
+  try {
+    const payload = { name: String(data.name).trim(), deal_type: data.deal_type };
+    const neighborhood = String(data.neighborhood || '').trim();
+    if (neighborhood) payload.neighborhood = neighborhood;
+    if (data.lead_id) payload.lead_id = data.lead_id;
+    if (data.deal_type === 'sale') payload.max_price = parseAmount(String(data.max_price || ''));
+    else {
+      payload.max_deposit = parseAmount(String(data.max_deposit || ''));
+      payload.max_rent = parseAmount(String(data.max_rent || ''));
+    }
+    await api('POST', `/v1/tenants/${encodeURIComponent(state.tenant)}/saved-searches`, payload);
+    await loadWorkspace();
+    form.reset();
+    toggleFieldGroup('#search-form', 'data-search', 'sale');
+    setStatus('جست‌وجوی ذخیره‌شده ساخته شد؛ از این به بعد فایل‌های جور هشدار می‌دهند.');
+  } catch (error) {
+    setStatus(`جست‌وجو ذخیره نشد: ${error.message}`, true);
+  }
 });
 
 $('#today').textContent = new Intl.DateTimeFormat('fa-IR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
